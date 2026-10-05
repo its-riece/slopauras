@@ -1,0 +1,18 @@
+## Interface: 16001
+## Title: SlopAuras
+## Notes: Rows of aura icons with any filter, on any frame.
+## Author: Riece
+## Version: 0.1.0
+## SavedVariables: SlopAurasDB
+## IconTexture: 1500939
+
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.xml
+Libs\AceGUI-3.0\AceGUI-3.0.xml
+Libs\AceConfig-3.0\AceConfig-3.0.xml
+
+Ranks.lua
+Chain.lua
+SlopAuras.lua
+Share.lua
+Options.lua
