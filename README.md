@@ -11,6 +11,8 @@
   </tr>
 </table>
 
+[Available on CurseForge.](https://www.curseforge.com/wow/addons/slopauras)
+
 SlopAuras is a close-to-the-metal frontend for AuraContainers. It manages frame creation and anchoring so you can focus on building the bits you care about.
 
 Some familiarity with AuraFilters and a novice understanding of AuraContainers is assumed. If that doesn't make any sense to you, please expect a bit of a learning curve. That said, SlopAuras ships with an `AGENTS.md` file that should help your favorite robot understand its settings and the game's rules. Give it your `SlopAuras` folder and describe what you want to see. You should be able to get a tailored walkthrough or a ready-made import string.
