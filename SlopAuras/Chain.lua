@@ -415,30 +415,13 @@ local PLAIN_OPTIONS = {
   { style = PRESERVE, showWhenHarmful = false, showWhenHelpful = true },
 }
 
--- Applies the display's look to one button's parts. Out of combat only.
--- Returns false if Blizzard refused part of it.
-local function StyleButton(part, d)
-  local ok = pcall(part.button.SetSize, part.button, d.size, d.size)
-  -- Per button, not per container: displays sharing a line can differ.
-  ok = pcall(part.button.SetAlpha, part.button, d.alpha) and ok
-  StyleIcon(part.icon, d)
-  -- CooldownFrameTemplate draws the remaining time as text over the swipe.
-  ok = pcall(part.cooldown.SetHideCountdownNumbers, part.cooldown, d.hideTimer == true) and ok
-  -- The engine's default countdown font is sized for action buttons and
-  -- covers small icons. Keep its face and outline, use the display's size.
-  local text = part.cooldown:GetCountdownFontString()
-  if text then
-    if not part.timerFont then
-      part.timerFont = { text:GetFont() }
-    end
-    local face, _, flags = unpack(part.timerFont)
-    if face then
-      ok = pcall(text.SetFont, text, face, d.timerSize, flags) and ok
-    end
-  end
+-- The dispel border on one button: Blizzard's art (part.borders) or plain
+-- strips (part.plainBorders), handed to the button so Blizzard picks the type.
+-- Out of combat only. Returns false if Blizzard refused part of it.
+local function StyleDispelBorders(part, d)
+  local ok = true
   local dispel = d.dispelBorder == true and not CustomBorder(d)
   local wanted = dispel and not Plain(d)
-  StyleCustomBorder(part.customBorder, d)
   local wantedPlain = dispel and Plain(d)
   for i, strips in ipairs(part.plainBorders) do
     PlaceStrips(strips, PlainWidth(d))
@@ -467,6 +450,46 @@ local function StyleButton(part, d)
     end
   end
   part.borderOn = wanted
+  return ok
+end
+
+-- Border textures for StyleDispelBorders, on `parent` around `button`.
+local function NewDispelBorders(parent, button)
+  local borders = {}
+  for i = 1, #BORDER_OPTIONS do
+    borders[i] = parent:CreateTexture(nil, "OVERLAY")
+    borders[i]:SetPoint("CENTER", button, "CENTER")
+  end
+  local plainBorders = {}
+  for i = 1, #PLAIN_OPTIONS do
+    plainBorders[i] = NewStrips(parent, button)
+  end
+  return borders, plainBorders
+end
+
+-- Applies the display's look to one button's parts. Out of combat only.
+-- Returns false if Blizzard refused part of it.
+local function StyleButton(part, d)
+  local ok = pcall(part.button.SetSize, part.button, d.size, d.size)
+  -- Per button, not per container: displays sharing a line can differ.
+  ok = pcall(part.button.SetAlpha, part.button, d.alpha) and ok
+  StyleIcon(part.icon, d)
+  -- CooldownFrameTemplate draws the remaining time as text over the swipe.
+  ok = pcall(part.cooldown.SetHideCountdownNumbers, part.cooldown, d.hideTimer == true) and ok
+  -- The engine's default countdown font is sized for action buttons and
+  -- covers small icons. Keep its face and outline, use the display's size.
+  local text = part.cooldown:GetCountdownFontString()
+  if text then
+    if not part.timerFont then
+      part.timerFont = { text:GetFont() }
+    end
+    local face, _, flags = unpack(part.timerFont)
+    if face then
+      ok = pcall(text.SetFont, text, face, d.timerSize, flags) and ok
+    end
+  end
+  StyleCustomBorder(part.customBorder, d)
+  ok = StyleDispelBorders(part, d) and ok
 
   -- Addon code can't animate inside an aura button, so the glow is handed to
   -- the button and Blizzard plays it whenever the button shows an aura
@@ -524,16 +547,7 @@ local function StyledButton(inst, j, parts)
     count:SetPoint("BOTTOMRIGHT", -1, 1)
     button:SetApplicationCount(count)
 
-    local borders = {}
-    for i = 1, #BORDER_OPTIONS do
-      borders[i] = overlay:CreateTexture(nil, "OVERLAY")
-      borders[i]:SetPoint("CENTER")
-    end
-
-    local plainBorders = {}
-    for i = 1, #PLAIN_OPTIONS do
-      plainBorders[i] = NewStrips(overlay, button)
-    end
+    local borders, plainBorders = NewDispelBorders(overlay, button)
     local customBorder = NewCustomBorder(overlay, button)
     local glow, glowAnim = NewGlow(overlay)
 
@@ -769,87 +783,69 @@ local function LocHidden(d, locType)
 end
 
 -- The first active entry (index 1 is the one the game ranks highest) that
--- the display doesn't hide and the game means to show with a timer.
+-- the display doesn't hide and the game means to show with a timer. The
+-- second result is true when an entry passed over for that has an aura other
+-- than the shown entry's: the border container can't tell such auras apart,
+-- so it could show theirs.
 local function LocEntry(d)
+  local shown, skipped
   for i = 1, C_LossOfControl.GetActiveLossOfControlDataCount() do
     local data = C_LossOfControl.GetActiveLossOfControlData(i)
-    if data and data.displayText and data.startTime and not LocHidden(d, data.locType) then
-      return data
+    if data then
+      if data.displayText and data.startTime and not LocHidden(d, data.locType) then
+        shown = shown or data
+      elseif data.auraInstanceID then
+        skipped = skipped or {}
+        skipped[data.auraInstanceID] = true
+      end
     end
   end
-end
-
--- Dispel-type borders for loss of control. The aura behind an entry is known
--- (auraInstanceID), but its dispel type is secret in combat, so it can't pick
--- a texture in Lua. C_UnitAuras.GetAuraDispelTypeColor maps the type through a
--- color curve instead (x: dispel type ID; 0 none, 1 Magic, 2 Curse, 3 Disease,
--- 4 Poison), and the secret color goes to SetVertexColor. Each of Blizzard's
--- border atlases gets a curve that's opaque only at its own type, so exactly
--- one shows. Other IDs (Bleed's isn't known) get the red typeless border.
-local LOC_BORDERS = {
-  { atlas = "ui-debuff-border-default-noicon", ids = { [0] = true, [5] = true } },
-  { atlas = "ui-debuff-border-magic-noicon", ids = { [1] = true } },
-  { atlas = "ui-debuff-border-curse-noicon", ids = { [2] = true } },
-  { atlas = "ui-debuff-border-disease-noicon", ids = { [3] = true } },
-  { atlas = "ui-debuff-border-poison-noicon", ids = { [4] = true } },
-}
-for _, border in ipairs(LOC_BORDERS) do
-  border.curve = C_CurveUtil.CreateColorCurve()
-  border.curve:SetType(Enum.LuaCurveType.Step) -- the point at 5 holds for every higher ID
-  for id = 0, 5 do
-    border.curve:AddPoint(id, CreateColor(1, 1, 1, border.ids[id] and 1 or 0))
+  if skipped and shown and shown.auraInstanceID then
+    skipped[shown.auraInstanceID] = nil
   end
+  return shown, skipped ~= nil and next(skipped) ~= nil
 end
 
--- A plain border takes the type's color itself, through one curve.
-local LOC_PLAIN_CURVE = C_CurveUtil.CreateColorCurve()
-LOC_PLAIN_CURVE:SetType(Enum.LuaCurveType.Step)
-for id, name in pairs({ [0] = "None", "Magic", "Curse", "Disease", "Poison", "None" }) do
-  LOC_PLAIN_CURVE:AddPoint(id, AuraUtil.GetAuraBorderColor(name))
-end
+-- Dispel border for loss of control. The aura behind an entry is known
+-- (auraInstanceID), but in combat addon code can't ask for its dispel type:
+-- C_UnitAuras.GetAuraDispelTypeColor errors ("Auras cannot be accessed when
+-- secret while tainted"). So a one-slot aura container on the player sits
+-- under the icon, its button carrying only the dispel border, and Blizzard
+-- picks the art. It shows the crowd control aura with the most time left,
+-- which is the game's own tiebreak between entries of equal priority
+-- (LossOfControlFrame.lua); a stun and a fear at once can disagree.
+local LOC_BORDER_FILTER = AuraUtil.CreateFilterString(AuraUtil.AuraFilters.Harmful, AuraUtil.AuraFilters.CrowdControl)
 
--- Shows the border for the aura behind `data`, or none (no aura: a school
--- lockout; or borders turned off).
-local function LocBorders(inst, data)
+local function LocBorderOptions(inst)
   local d = inst.display
-  local id = d.dispelBorder and not CustomBorder(d) and data and data.auraInstanceID
-  local plain = Plain(d)
-  local ok, color = false, nil
-  if id and plain then
-    ok, color = pcall(C_UnitAuras.GetAuraDispelTypeColor, "player", id, LOC_PLAIN_CURVE)
-  end
-  if ok and color then
-    ShowStrips(inst.plainStrips, true, color:GetRGBA())
-  else
-    ShowStrips(inst.plainStrips, false)
-  end
-  for i, texture in ipairs(inst.borders) do
-    ok, color = false, nil
-    if id and not plain then
-      ok, color = pcall(C_UnitAuras.GetAuraDispelTypeColor, "player", id, LOC_BORDERS[i].curve)
-    end
-    if ok and color then
-      texture:SetVertexColor(color:GetRGBA())
-      texture:Show()
-    else
-      texture:Hide()
-    end
-  end
+  return {
+    maxFrameCount = 1,
+    sortMethod = AuraContainerSortMethod.ExpirationOnly,
+    sortDirection = AuraContainerSortDirection.Reverse,
+    layout = { elementWidth = d.size, elementHeight = d.size, elementSpacing = 0 },
+    initializeFrame = function(button)
+      button:EnableMouse(false)
+      button:SetSize(inst.display.size, inst.display.size)
+      local borders, plainBorders = NewDispelBorders(button, button)
+      local part = { button = button, borders = borders, plainBorders = plainBorders, borderOn = false, plainOn = false }
+      table.insert(inst.borderParts, part)
+      StyleDispelBorders(part, inst.display)
+    end,
+  }
 end
+
 
 local function StyleLoc(inst)
   local d = inst.display
   inst.frame:SetAlpha(d.alpha)
   inst.icon:SetSize(d.size, d.size)
-  for _, texture in ipairs(inst.borders) do
-    texture:SetSize(d.size * BORDER_SIZE, d.size * BORDER_SIZE)
-  end
-  PlaceStrips(inst.plainStrips, PlainWidth(d))
-  if not d.dispelBorder or CustomBorder(d) then
-    LocBorders(inst, nil)
+  local ok = pcall(inst.borderBox.SetAuraGroupLayout, inst.borderBox, Key(1), LocBorderOptions(inst).layout)
+  for _, part in ipairs(inst.borderParts) do
+    ok = pcall(part.button.SetSize, part.button, d.size, d.size) and ok
+    ok = StyleDispelBorders(part, d) and ok
   end
   StyleCustomBorder(inst.customBorder, d)
-  inst.shownSpell = nil -- the next update redraws, borders included
+  inst.shownSpell, inst.borderShown = nil, nil -- the next update redraws, borders included
   StyleIcon(inst.icon, d)
   inst.cooldown:SetHideCountdownNumbers(d.hideTimer == true)
   local text = inst.cooldown:GetCountdownFontString()
@@ -864,6 +860,7 @@ local function StyleLoc(inst)
   if face then
     inst.label:SetFont(face, d.labelSize, flags)
   end
+  return ok
 end
 
 function Chain.NewLoc(parent, unit, d, g, label)
@@ -886,15 +883,12 @@ function Chain.NewLoc(parent, unit, d, g, label)
   overlay:SetAllPoints()
   overlay:SetFrameLevel(inst.cooldown:GetFrameLevel() + 1)
   inst.customBorder = NewCustomBorder(overlay, inst.icon)
-  inst.plainStrips = NewStrips(overlay, inst.icon)
-  inst.borders = {}
-  for i, border in ipairs(LOC_BORDERS) do
-    local texture = overlay:CreateTexture(nil, "OVERLAY")
-    texture:SetPoint("CENTER", inst.icon, "CENTER")
-    texture:SetAtlas(border.atlas)
-    texture:Hide()
-    inst.borders[i] = texture
-  end
+  -- Its one button lands on the icon (flow anchor and container anchor are
+  -- both the icon's start corner).
+  inst.borderParts = {}
+  inst.borderBox = NewContainer(overlay, unit, g, inst.icon)
+  Name(inst.borderBox, label .. " (loss of control border)")
+  inst.borderBox:AddAuraGroup(Key(1), LOC_BORDER_FILTER, LocBorderOptions(inst))
   StyleLoc(inst)
   return inst
 end
@@ -902,7 +896,10 @@ end
 -- Refreshes the icon, timer and text from the game. Returns whether there's
 -- anything to show and, when the entry is new, its seconds remaining.
 function Chain.UpdateLoc(inst)
-  local data = inst.unit == "player" and LocEntry(inst.display)
+  local data, conflict
+  if inst.unit == "player" then
+    data, conflict = LocEntry(inst.display)
+  end
   if not data then
     inst.shownSpell, inst.shownStart = nil, nil
     return false
@@ -917,7 +914,17 @@ function Chain.UpdateLoc(inst)
       text = LOSS_OF_CONTROL_DISPLAY_INTERRUPT_SCHOOL:format(C_Spell.GetSchoolString(data.lockoutSchool))
     end
     inst.label:SetText(text)
-    LocBorders(inst, data)
+  end
+  -- No aura behind a school lockout, and a skipped entry's aura could take
+  -- the slot: either way any border would be another CC's. Checked on every
+  -- update, since a skipped entry can come and go under the same shown one.
+  -- Showing and enabling a container are allowed in combat.
+  local d = inst.display
+  local border = d.dispelBorder == true and not CustomBorder(d) and data.auraInstanceID ~= nil and not conflict
+  if border ~= inst.borderShown then
+    inst.borderShown = border
+    inst.borderBox:SetShown(border)
+    inst.borderBox:SetEnabled(border)
   end
   return true, new and data.timeRemaining or nil
 end
@@ -941,8 +948,7 @@ end
 -- Returns false if Blizzard refused part of the restyle.
 function Chain.Configure(inst, g, lineSpacing, cap)
   if inst.loc then
-    StyleLoc(inst)
-    return true
+    return StyleLoc(inst)
   end
   local maxCount = inst.window and 1 or nil
   if inst.capWindow and cap then
@@ -1092,7 +1098,7 @@ function Chain.SetDisplayActive(inst, j, active)
 end
 
 local function Containers(inst)
-  return inst.main, inst.shadow, inst.slide
+  return inst.main, inst.shadow, inst.slide, inst.borderBox
 end
 
 function Chain.SetUnit(inst, unit)

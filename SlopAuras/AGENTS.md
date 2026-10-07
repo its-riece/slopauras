@@ -50,9 +50,11 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
   `AuraUtil.IsValidFilterString` accepts them.
 - **Aura groups don't dedupe.** An aura matching two displays shows twice; configs split
   displays by filter and dispel type instead.
-- **Dispel type is secret** for border colors on non-aura frames: loss of control colors its
-  borders through `C_UnitAuras.GetAuraDispelTypeColor` with color curves, and passes the
-  secret color to `SetVertexColor`.
+- **Addon code can't look up an aura's dispel type in combat**:
+  `C_UnitAuras.GetAuraDispelTypeColor` errors when called from tainted code while auras are
+  secret. Loss of control gets its border from a one-slot aura container under its icon
+  (`HARMFUL|CROWD_CONTROL`, longest remaining first) whose button carries only the dispel
+  border.
 - **Range is secret**: `UnitInRange` feeds `SetAlphaFromBoolean` on the glow.
 - Edit Mode fills every container with placeholder auras (`editModePreviewEnabled` in the
   template). SlopAuras keeps that preview on.
