@@ -1791,6 +1791,32 @@ local function HookWidgets(container)
   end
 end
 
+-- The tab keys of a display entry and of a group's Settings entry.
+local DISPLAY_TABS = { what = true, look = true, load = true, share = true }
+local SETTINGS_TABS = { general = true, placement = true, look = true, load = true, share = true }
+
+-- AceConfigDialog remembers the selected tab per tree entry and reads it when
+-- it draws the entry's tabs (status.groups.selected). Setting the same tab on
+-- every entry that has it opens the next display or group on the tab in use.
+local function CarryTab(tab)
+  local function Select(path)
+    local status = AceConfigDialog:GetStatusTable(addonName, path)
+    status.groups = status.groups or {}
+    status.groups.selected = tab
+  end
+  for _, group in ipairs(ns.groups) do
+    local key = "g" .. group.id
+    if SETTINGS_TABS[tab] then
+      Select({ key, "settings" })
+    end
+    if DISPLAY_TABS[tab] then
+      for i in ipairs(group.displays) do
+        Select({ key, "d" .. i })
+      end
+    end
+  end
+end
+
 function ns.InitOptions()
   LibStub("AceConfig-3.0"):RegisterOptionsTable(addonName, Options)
   local _, categoryID = AceConfigDialog:AddToBlizOptions(addonName, "SlopAuras")
@@ -1799,6 +1825,10 @@ function ns.InitOptions()
       return
     end
     HookWidgets(container)
+    -- A tab's page: { group, display or "settings", tab }.
+    if path and #path == 3 and type(path[1]) == "string" and path[1]:match("^g%d+$") then
+      CarryTab(path[3])
+    end
     -- A group's own page has nothing on it: its tabs live under its Settings
     -- entry (AceConfigDialog can't give one node both tree children and
     -- tabs). Selecting the group goes there instead, a frame later, once this
