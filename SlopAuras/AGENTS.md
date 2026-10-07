@@ -163,7 +163,8 @@ x, y }`), `growth`, `lines`, `lineSpacing`, `lineMax`, `displays`.
 
 1. A default in `DEFAULTS` (SlopAuras.lua) if it needs one.
 2. Use it where it acts (`Chain.Configure` / `StyleButton` for looks, `Shows` for
-   conditions).
+   conditions). A key `StyleButton` reads also goes in `STYLE_KEYS` (Chain.lua):
+   `Configure` skips buttons whose keys there haven't changed.
 3. A control in Options.lua, added to `LOOK_KEYS` or `LOAD_KEYS` so "Reset to
    group settings" clears it, and wrapped in `Resettable` for right-click.
 4. A validator in Share.lua's spec tables, plus `SharedValue` if the saved form differs

@@ -147,14 +147,39 @@ local function DispelFilter(d, filters)
   end
 end
 
+-- "id:on,id:on" in ID order, so equal sets give equal strings.
+local function SetText(set)
+  local ids = {}
+  for id in pairs(set or {}) do
+    ids[#ids + 1] = id
+  end
+  table.sort(ids)
+  for i, id in ipairs(ids) do
+    ids[i] = id .. ":" .. tostring(set[id])
+  end
+  return table.concat(ids, ",")
+end
+
+-- Per display: the inputs Candidates last saw and its result. Every host
+-- builds the same filters from the same display, and an unchanged display
+-- hands back the same table, which Reconfigure uses to skip the setter.
+local candidateCache = setmetatable({}, { __mode = "k" })
+
 local function Candidates(d)
+  local inputs = SetText(d.spellIDs) .. "/" .. SetText(d.rankSpellIDs) .. "/" .. table.concat(d.dispelTypes or {}, ",")
+  local cached = candidateCache[d]
+  if cached and cached.inputs == inputs then
+    return cached.filters
+  end
   local filters = {}
   -- excludeSpellIDs is checked first, and like includeSpellIDs only where
   -- the game allows spell ID filters (CanApplyIdentityCandidateFilters in
   -- Blizzard_AuraContainerUtil.lua); elsewhere the exclusion is skipped.
   filters.includeSpellIDs, filters.excludeSpellIDs = Chain.SpellIDs(d)
   DispelFilter(d, filters)
-  return next(filters) and filters or nil
+  filters = next(filters) and filters or nil
+  candidateCache[d] = { inputs = inputs, filters = filters }
+  return filters
 end
 
 -- Blizzard refuses some anchors to aura containers. Report them instead of erroring.
@@ -479,6 +504,22 @@ local function NewDispelBorders(parent, button)
   return borders, plainBorders
 end
 
+-- Every display key StyleButton reads, as one string: Configure restyles a
+-- button only when it changed. A new key StyleButton reads goes here too.
+local STYLE_KEYS = {
+  "size", "alpha", "zoom", "desaturate", "tint", "hideTimer", "timerSize", "mode",
+  "dispelBorder", "borderColor", "borderStyle", "borderWidth", "glow", "glowCombat", "glowInRange",
+}
+
+local function StyleText(d)
+  local values = {}
+  for i, key in ipairs(STYLE_KEYS) do
+    local value = d[key]
+    values[i] = type(value) == "table" and table.concat(value, ",") or tostring(value)
+  end
+  return table.concat(values, "|")
+end
+
 -- Applies the display's look to one button's parts. Out of combat only.
 -- Returns false if Blizzard refused part of it.
 local function StyleButton(part, d)
@@ -569,7 +610,10 @@ local function StyledButton(inst, j, parts)
       glow = glow, glowAnim = glowAnim, glowOn = false, inst = inst,
     }
     table.insert(parts, part)
-    StyleButton(part, inst.displays[j])
+    local d = inst.displays[j]
+    if StyleButton(part, d) then
+      part.style = StyleText(d)
+    end
   end
 end
 
@@ -684,6 +728,29 @@ local function FilterFor(inst, d)
   return d.filter
 end
 
+-- What `container`'s aura group j was last given, for Reconfigure.
+local function Sent(inst, container, j)
+  inst.sent = inst.sent or {}
+  local sent = inst.sent[container] or {}
+  inst.sent[container] = sent
+  sent[j] = sent[j] or {}
+  return sent[j]
+end
+
+local function LayoutText(layout)
+  return layout.elementWidth .. "x" .. layout.elementHeight .. "/" .. layout.elementSpacing
+end
+
+-- Adds aura group j and records its options, so the first Reconfigure after
+-- a build only sends what changed.
+local function AddGroup(inst, container, j, d, options)
+  container:AddAuraGroup(Key(j), FilterFor(inst, d), options)
+  local last = Sent(inst, container, j)
+  last.candidatesSent, last.candidates = true, options.candidateFilters
+  last.sortMethod, last.sortDirection = options.sortMethod, options.sortDirection
+  last.layout = LayoutText(options.layout)
+end
+
 -- One line's list displays, for one unit: a container with an aura group per
 -- display (keys d1, d2, ... in line order), hidden. `label` names its frames
 -- in /fstack, e.g. "MyDebuffs line 1". `cap`: show only that many icons (not
@@ -705,13 +772,13 @@ function Chain.NewList(parent, unit, displays, g, lineSpacing, label, cap, plate
   Name(inst.main, label)
   for j, d in ipairs(displays) do
     inst.parts[j] = {}
-    inst.main:AddAuraGroup(Key(j), FilterFor(inst, d), GroupOptions(d, g, lineSpacing, false, nil, StyledButton(inst, j, inst.parts[j])))
+    AddGroup(inst, inst.main, j, d, GroupOptions(d, g, lineSpacing, false, nil, StyledButton(inst, j, inst.parts[j])))
   end
   if g.shadow then
     inst.shadow = NewContainer(parent, unit, g.shadow)
     Name(inst.shadow, label .. " (shadow)")
     for j, d in ipairs(displays) do
-      inst.shadow:AddAuraGroup(Key(j), FilterFor(inst, d), GroupOptions(d, g.shadow, lineSpacing, true))
+      AddGroup(inst, inst.shadow, j, d, GroupOptions(d, g.shadow, lineSpacing, true))
     end
   end
   if inst.capWindow then
@@ -733,11 +800,11 @@ function Chain.NewMissing(parent, unit, d, g, lineSpacing, label, plate)
   local inst = { display = d, displays = { d }, inRange = true, plate = plate }
   inst.main = NewContainer(parent, unit, g)
   Name(inst.main, label .. " (presence)")
-  inst.main:AddAuraGroup(Key(1), FilterFor(inst, d), GroupOptions(d, g, lineSpacing, false, 1))
+  AddGroup(inst, inst.main, 1, d, GroupOptions(d, g, lineSpacing, false, 1))
 
   inst.slide = NewContainer(parent, unit, g)
   Name(inst.slide, label .. " (slide)")
-  inst.slide:AddAuraGroup(Key(1), FilterFor(inst, d), SlideOptions(d, g))
+  AddGroup(inst, inst.slide, 1, d, SlideOptions(d, g))
 
   inst.window = CreateFrame("Frame", nil, parent, "DisableUntrustedLayoutScriptsTemplate")
   Name(inst.window, label .. " (missing icon)")
@@ -756,7 +823,7 @@ function Chain.NewMissing(parent, unit, d, g, lineSpacing, label, plate)
   if g.shadow then
     inst.shadow = NewContainer(parent, unit, g.shadow)
     Name(inst.shadow, label .. " (shadow)")
-    inst.shadow:AddAuraGroup(Key(1), FilterFor(inst, d), GroupOptions(d, g.shadow, lineSpacing, true, 1))
+    AddGroup(inst, inst.shadow, 1, d, GroupOptions(d, g.shadow, lineSpacing, true, 1))
   end
   return inst
 end
@@ -941,15 +1008,31 @@ function Chain.UpdateLoc(inst)
   return true, new and data.timeRemaining or nil
 end
 
--- `optionsFor(d)` gives each display's aura group options.
+-- `optionsFor(d)` gives each display's aura group options. The candidate
+-- filter, sort and layout setters rebuild or relayout the container even when
+-- the value is the same (Blizzard_CustomAuraContainer.lua), and the editor
+-- applies every change to every host, so each is sent only when it differs
+-- from what this container last got. The filter and max setters compare
+-- themselves.
 local function Reconfigure(container, inst, optionsFor)
   for j, d in ipairs(inst.displays) do
     local key, options = Key(j), optionsFor(d)
+    local last = Sent(inst, container, j)
     container:SetAuraGroupFilterString(key, FilterFor(inst, d))
-    container:SetAuraGroupCandidateFilters(key, options.candidateFilters)
-    container:SetAuraGroupSortMethod(key, options.sortMethod, options.sortDirection)
+    if not last.candidatesSent or last.candidates ~= options.candidateFilters then
+      container:SetAuraGroupCandidateFilters(key, options.candidateFilters)
+      last.candidatesSent, last.candidates = true, options.candidateFilters
+    end
+    if last.sortMethod ~= options.sortMethod or last.sortDirection ~= options.sortDirection then
+      container:SetAuraGroupSortMethod(key, options.sortMethod, options.sortDirection)
+      last.sortMethod, last.sortDirection = options.sortMethod, options.sortDirection
+    end
     container:SetAuraGroupMaxFrameCount(key, options.maxFrameCount)
-    container:SetAuraGroupLayout(key, options.layout)
+    local layoutText = LayoutText(options.layout)
+    if last.layout ~= layoutText then
+      container:SetAuraGroupLayout(key, options.layout)
+      last.layout = layoutText
+    end
   end
 end
 
@@ -977,8 +1060,13 @@ function Chain.Configure(inst, g, lineSpacing, cap)
   end
   local ok = true
   for j, d in ipairs(inst.displays) do
+    local style = StyleText(d)
     for _, part in ipairs(inst.parts[j]) do
-      ok = StyleButton(part, d) and ok
+      if part.style ~= style then
+        local styled = StyleButton(part, d)
+        part.style = styled and style or nil -- a refused restyle is tried again
+        ok = styled and ok
+      end
     end
   end
   return ok

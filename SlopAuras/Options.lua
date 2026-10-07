@@ -1686,9 +1686,18 @@ local function NewGroup()
   AceConfigDialog:SelectGroup(addonName, "g" .. group.id, "settings")
 end
 
+-- The status line as last drawn, so RefreshStatus redraws only when it changed.
+local lastStatus
+
 local function Options()
   local args = {
-    status = { type = "description", order = 1, fontSize = "medium", name = Status, hidden = function() return Status() == "" end },
+    status = {
+      type = "description", order = 1, fontSize = "medium", name = Status,
+      hidden = function()
+        lastStatus = Status()
+        return lastStatus == ""
+      end,
+    },
     statusGap = { type = "description", order = 1.5, name = " ", width = "full", hidden = function() return Status() == "" end },
     newGroup = { type = "execute", order = 2, name = "New group", func = NewGroup },
     topBreak = Break(3.9),
@@ -1705,7 +1714,6 @@ end
 
 -- The status line changes when combat starts or ends, or an apply retires
 -- enough containers. Only then redraw: redrawing mid-drag would interrupt it.
-local lastStatus
 local function RefreshStatus()
   local status = Status()
   if status ~= lastStatus then
