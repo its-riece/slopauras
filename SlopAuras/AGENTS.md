@@ -98,6 +98,29 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
   nameplate addons hide). Screen/frame rows of all hosts join one strand (`Strand`).
   Nameplate lines add `INCLUDE_NAME_PLATE_ONLY` to their filters, as Blizzard's plates do.
 
+## Masque (optional)
+
+- `skin = "masque"` (the default when Masque is loaded) skins a display; the border color
+  then goes on the skin's ring and `borderStyle` (Blizzard / Plain) is unused. The flag
+  is in the row signature, and `Apply` rebuilds when any display's flag changed
+  (`MasqueFlags`), since the editor sends it as a look change.
+- One Masque group per SlopAuras group with skinned displays (`SyncSkins`,
+  SlopAuras.lua; static ID = group id), passed to `Chain.NewList` / `NewMissing` as
+  `skin`. A Masque option change bumps `skinEpoch` (part of `StyleText`) and restyles
+  everything.
+- List buttons register `{ Icon, Cooldown, Count, Border }` as type "Aura"; missing icons
+  register their holder with `{ Icon, Border }` (the ring only carries a custom color
+  there). Masque draws the skin's frame art (Normal) itself.
+- `StyleButton` tells Masque the size (`Group:SetFrameSize`: container buttons can report
+  secret sizes), then zooms inside the skin's icon crop (`SkinCrop`, from the skin data).
+- Dispel colors go on the skin's Border layer (`NewRing`): handed to the button with
+  `PreserveAsset`, so Blizzard tints it; the frame art is never tinted. A custom border
+  color goes on a copy of the ring (`ring.custom`).
+- Sizes follow Masque's `GetScaleSize`: skin width × icon size ÷ 36 × the group's Scale
+  option (`SkinSize`). Skinned glows use Masque's spell alert rule (`SpellAlert` size
+  × 1.4); clip windows reach as far as the skin's widest layer, the icon included
+  (`SkinReach`). The group's skin and Scale come from `group.db` (no public getter).
+
 ## Applying changes
 
 - The editor writes into the saved tables and calls `ns.Changed(structural)`; changes apply
@@ -147,7 +170,7 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
 
 Shared (group or display): `filter`, `size`, `spacing`, `alpha`, `zoom`, `timerSize`,
 `labelSize`, `max`, `sort`, `sortReverse`, `desaturate`, `tint`, `dispelBorder`,
-`borderColor`, `borderStyle`, `borderWidth`, `hideTimer`, `glow`, `glowCombat` (`"never"`
+`borderColor`, `skin`, `borderStyle`, `borderWidth`, `hideTimer`, `glow`, `glowCombat` (`"never"`
 too), `glowInRange`, `combat`, `neverLoad`, `knownSpell` (an ID or list; negative = must not
 know; at least one positive must be known), `hideWhenPlayerDead`, `class`, `nameplateUnits`,
 `resting` and `mounted` (`true` only while, `false` only while not, `"any"`), `hideWhenDead`,

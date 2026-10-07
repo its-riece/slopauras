@@ -208,11 +208,87 @@ local function MeasureOnly(width, height)
   end
 end
 
-local function StyleIcon(texture, d)
+-- Masque ---------------------------------------------------------------------
+-- Displays with d.skin "masque" are skinned by their group's Masque
+-- group (`inst.skin`). Only their buttons are registered with Masque, so a
+-- switch to or from "masque" rebuilds the line (it's in the row signature).
+-- Masque sizes a skin's art from a 36px button (SkinRoot.Size); the sizes
+-- here follow that rule.
+local Masque = LibStub("Masque", true)
+local SKIN_BASE = 36
+
+local function UsesMasque(inst, d)
+  return inst.skin ~= nil and d.skin == "masque"
+end
+
+-- How display `d` of `inst` is skinned, or nil when it isn't skinned or its
+-- Masque group is disabled: { data = the skin's table, scale = the group's
+-- Scale option }. The group's skin and scale have no public getter, hence db.
+local function SkinData(inst, d)
+  if not UsesMasque(inst, d) or inst.skin.db.Disabled then
+    return nil
+  end
+  local db = inst.skin.db
+  return {
+    data = Masque:GetSkin(db.SkinID) or select(2, Masque:GetDefaultSkin()),
+    scale = type(db.Scale) == "number" and db.Scale or 1,
+  }
+end
+
+-- A layer's entry for aura buttons: Masque prefers a skin's per-type entry
+-- (GetTypeSkin).
+local function SkinLayer(skin, layer)
+  local entry = skin.data[layer]
+  if type(entry) == "table" and type(entry.Aura) == "table" then
+    return entry.Aura
+  end
+  return type(entry) == "table" and entry or nil
+end
+
+-- How many pixels Masque makes `layer` for a `size` icon: its skin width on a
+-- 36px button, scaled to the icon and by the group's Scale (GetScaleSize).
+local function SkinSize(skin, layer, size)
+  local entry = SkinLayer(skin, layer)
+  return (entry and entry.Width or SKIN_BASE) * size / SKIN_BASE * skin.scale
+end
+
+-- How far a skin's art reaches past each edge of a `size` icon, never less
+-- than 0. The icon itself counts: Scale enlarges it too.
+local function SkinReach(skin, size)
+  local width = size
+  for _, layer in ipairs({ "Icon", "Normal", "Border", "Shadow", "Gloss" }) do
+    width = math.max(width, SkinSize(skin, layer, size))
+  end
+  return math.ceil((width - size) / 2)
+end
+
+-- The icon's tex coords in the skin (left, right, top, bottom), or nil for
+-- the whole texture.
+local function SkinCrop(skin)
+  local icon = SkinLayer(skin, "Icon")
+  local coords = icon and icon.TexCoords
+  return type(coords) == "table" and #coords == 4 and coords or nil
+end
+
+-- Bumped when a Masque skin changes, so Configure restyles every button.
+local skinEpoch = 0
+
+function Chain.Reskinned()
+  skinEpoch = skinEpoch + 1
+end
+
+-- `crop`: a skin's tex coords for the icon (SkinCrop); zoom crops inside them.
+local function StyleIcon(texture, d, crop)
   -- Zoom keeps the middle (1 - zoom / 2) of the texture on each axis, as
   -- WeakAuras does. Icon textures have a border baked into their edge.
-  local edge = (d.zoom or 0) / 4
-  texture:SetTexCoord(edge, 1 - edge, edge, 1 - edge)
+  local left, right, top, bottom = 0, 1, 0, 1
+  if crop then
+    left, right, top, bottom = unpack(crop)
+  end
+  local keep = 1 - (d.zoom or 0) / 2
+  local x, y = (left + right) / 2, (top + bottom) / 2
+  local w, h = (right - left) / 2 * keep, (bottom - top) / 2 * keep
+  texture:SetTexCoord(x - w, x + w, y - h, y + h)
   texture:SetDesaturated(d.desaturate == true)
   if d.tint then
     texture:SetVertexColor(unpack(d.tint))
@@ -272,8 +348,13 @@ end
 local GLOW_SCALE = 1.65 -- no border, or plain strips
 local GLOW_SCALE_ART = 1.75 -- Blizzard's border art
 
-local function GlowSize(d)
-  if not HasBorder(d) then
+-- `skin`: how a skinned icon is skinned (SkinData). Its glow follows the
+-- skin, sized as Masque sizes its own spell alerts (Skin_FlipBooks): the
+-- skin's SpellAlert size, times 1.4.
+local function GlowSize(d, skin)
+  if skin then
+    return SkinSize(skin, "SpellAlert", d.size) * 1.4
+  elseif not HasBorder(d) then
     return d.size * GLOW_SCALE
   elseif Plain(d) then
     return (d.size + 2 * PlainWidth(d)) * GLOW_SCALE
@@ -282,13 +363,15 @@ local function GlowSize(d)
 end
 
 -- How far the glow itself reaches past each edge of the icon.
-local function GlowReach(d)
-  return d.glow and math.ceil((GlowSize(d) - d.size) / 2) or 0
+local function GlowReach(d, skin)
+  return d.glow and math.ceil((GlowSize(d, skin) - d.size) / 2) or 0
 end
 
-local function GlowPad(d)
-  local pad = d.glow and GlowReach(d) + 2 or 0
-  if CustomBorder(d) then
+local function GlowPad(d, skin)
+  local pad = d.glow and GlowReach(d, skin) + 2 or 0
+  if skin then
+    pad = math.max(pad, SkinReach(skin, d.size) + 1)
+  elseif CustomBorder(d) then
     pad = math.max(pad, BorderReach(d) + 1)
   end
   return pad
@@ -348,10 +431,21 @@ local function NewCustomBorder(parent, anchor)
   return { art = art, strips = NewStrips(parent, anchor) }
 end
 
-local function StyleCustomBorder(kit, d)
+-- `ring`: a skinned button's skin border (NewRing), whose custom copy then
+-- carries the color in place of our art.
+local function StyleCustomBorder(kit, d, ring)
   local color = CustomBorder(d)
   kit.art:SetSize(d.size * BORDER_SIZE, d.size * BORDER_SIZE)
   PlaceStrips(kit.strips, PlainWidth(d))
+  if ring then
+    kit.art:Hide()
+    ShowStrips(kit.strips, false)
+    if color then
+      ring.custom:SetVertexColor(unpack(color))
+    end
+    ring.custom:SetShown(color ~= nil)
+    return
+  end
   if color and not Plain(d) then
     kit.art:SetVertexColor(unpack(color))
     kit.art:Show()
@@ -386,8 +480,9 @@ end
 
 -- d.glow: true for the atlas's own gold, { r, g, b } for a color. Tinting
 -- works on the desaturated art.
-local function StyleGlow(texture, d)
-  local ok = pcall(texture.SetSize, texture, GlowSize(d), GlowSize(d))
+local function StyleGlow(texture, d, skin)
+  local size = GlowSize(d, skin)
+  local ok = pcall(texture.SetSize, texture, size, size)
   local color = type(d.glow) == "table" and d.glow
   ok = pcall(texture.SetDesaturated, texture, color and true or false) and ok
   if color then
@@ -444,22 +539,68 @@ local BORDER_OPTIONS = {
   { style = BORDER_STYLE, showWhenHarmful = true, showWhenHelpful = false, showWithoutDispelType = true },
   { style = BORDER_STYLE, showWhenHarmful = false, showWhenHelpful = true },
 }
--- The same rules for plain strips: PreserveAsset keeps our white texture and
--- only colors it for the dispel type (AuraUtil.SetAuraBorderColor).
+-- The same rules for plain strips and a skin's border: PreserveAsset keeps our
+-- texture and only colors it for the dispel type (AuraUtil.SetAuraBorderColor).
 local PRESERVE = Enum.CustomAuraButtonDispelTypeTextureStyle.PreserveAsset
 local PLAIN_OPTIONS = {
   { style = PRESERVE, showWhenHarmful = true, showWhenHelpful = false, showWithoutDispelType = true },
   { style = PRESERVE, showWhenHarmful = false, showWhenHelpful = true },
 }
 
--- The dispel border on one button: Blizzard's art (part.borders) or plain
--- strips (part.plainBorders), handed to the button so Blizzard picks the type.
--- Out of combat only. Returns false if Blizzard refused part of it.
-local function StyleDispelBorders(part, d)
+-- A skin's Border layer (Caith's is a white ring) carries the dispel color
+-- over the skin's frame art, which stays untinted. ring[1] is the button's
+-- Border region in Masque; ring[2] copies its art (CopyRing), since one
+-- texture takes one set of options and buffs and debuffs need two.
+-- ring.custom copies it too, for a custom color, so we never color a
+-- texture Blizzard also colors.
+local function NewRing(parent)
+  local ring = { parent:CreateTexture(nil, "OVERLAY"), parent:CreateTexture(nil, "OVERLAY") }
+  ring.custom = parent:CreateTexture(nil, "OVERLAY")
+  ring[2]:SetAllPoints(ring[1])
+  ring.custom:SetAllPoints(ring[1])
+  ring[1]:Hide()
+  ring[2]:Hide()
+  ring.custom:Hide()
+  return ring
+end
+
+-- After Masque skins ring[1]: copies its art to the other two.
+local function CopyRing(ring)
+  local from = ring[1]
+  for _, to in ipairs({ ring[2], ring.custom }) do
+    pcall(function()
+      to:SetTexture(from:GetTexture())
+      to:SetTexCoord(from:GetTexCoord())
+      to:SetBlendMode(from:GetBlendMode())
+      to:SetDrawLayer(from:GetDrawLayer())
+    end)
+  end
+end
+
+-- The dispel border on one button: Blizzard's art (part.borders), plain
+-- strips (part.plainBorders) or, `skinned`, the skin's border (part.ring),
+-- handed to the button so Blizzard picks the type. Out of combat only.
+-- Returns false if Blizzard refused part of it.
+local function StyleDispelBorders(part, d, skinned)
   local ok = true
   local dispel = d.dispelBorder == true and not CustomBorder(d)
-  local wanted = dispel and not Plain(d)
-  local wantedPlain = dispel and Plain(d)
+  local wanted = dispel and not Plain(d) and not skinned
+  local wantedPlain = dispel and Plain(d) and not skinned
+  local wantedRing = dispel and skinned == true
+  if part.ring and wantedRing ~= part.ringOn then
+    for i, ring in ipairs(part.ring) do
+      if wantedRing then
+        ok = pcall(part.button.AddDispelTypeTexture, part.button, ring, PLAIN_OPTIONS[i]) and ok
+      else
+        ok = pcall(part.button.RemoveDispelTypeTexture, part.button, ring) and ok
+      end
+    end
+    part.ringOn = wantedRing
+  end
+  if part.ring and not wantedRing then
+    part.ring[1]:Hide()
+    part.ring[2]:Hide()
+  end
   for i, strips in ipairs(part.plainBorders) do
     PlaceStrips(strips, PlainWidth(d))
     if wantedPlain ~= part.plainOn then
@@ -508,7 +649,8 @@ end
 -- button only when it changed. A new key StyleButton reads goes here too.
 local STYLE_KEYS = {
   "size", "alpha", "zoom", "desaturate", "tint", "hideTimer", "timerSize", "mode",
-  "dispelBorder", "borderColor", "borderStyle", "borderWidth", "glow", "glowCombat", "glowInRange",
+  "dispelBorder", "borderColor", "skin", "borderStyle", "borderWidth", "glow", "glowCombat",
+  "glowInRange",
 }
 
 local function StyleText(d)
@@ -517,6 +659,7 @@ local function StyleText(d)
     local value = d[key]
     values[i] = type(value) == "table" and table.concat(value, ",") or tostring(value)
   end
+  values[#values + 1] = skinEpoch
   return table.concat(values, "|")
 end
 
@@ -526,7 +669,25 @@ local function StyleButton(part, d)
   local ok = pcall(part.button.SetSize, part.button, d.size, d.size)
   -- Per button, not per container: displays sharing a line can differ.
   ok = pcall(part.button.SetAlpha, part.button, d.alpha) and ok
-  StyleIcon(part.icon, d)
+  local skin = SkinData(part.inst, d)
+  if skin then
+    -- Buttons in a container can report secret sizes, so Masque is told the
+    -- size (Group:SetFrameSize); this also reskins the button.
+    if pcall(part.inst.skin.SetFrameSize, part.inst.skin, d.size, d.size, part.button) then
+      CopyRing(part.ring)
+    else
+      ok = false
+    end
+  elseif part.ring then
+    -- A disabled Masque group leaves regions where its default skin put them.
+    part.icon:ClearAllPoints()
+    part.icon:SetAllPoints()
+    part.cooldown:ClearAllPoints()
+    part.cooldown:SetAllPoints()
+    part.count:ClearAllPoints()
+    part.count:SetPoint("BOTTOMRIGHT", -1, 1)
+  end
+  StyleIcon(part.icon, d, skin and SkinCrop(skin))
   -- CooldownFrameTemplate draws the remaining time as text over the swipe.
   ok = pcall(part.cooldown.SetHideCountdownNumbers, part.cooldown, d.hideTimer == true) and ok
   -- The engine's default countdown font is sized for action buttons and
@@ -541,14 +702,14 @@ local function StyleButton(part, d)
       ok = pcall(text.SetFont, text, face, d.timerSize, flags) and ok
     end
   end
-  StyleCustomBorder(part.customBorder, d)
-  ok = StyleDispelBorders(part, d) and ok
+  ok = StyleDispelBorders(part, d, skin ~= nil) and ok
+  StyleCustomBorder(part.customBorder, d, skin and part.ring)
 
   -- Addon code can't animate inside an aura button, so the glow is handed to
   -- the button and Blizzard plays it whenever the button shows an aura
   -- (ApplyVisibility, Blizzard_CustomAuraButton.lua). Registered, its
   -- animation can't change, but it can be removed and added again.
-  ok = StyleGlow(part.glow, d) and ok
+  ok = StyleGlow(part.glow, d, skin) and ok
   local glow = d.glow and true or false
   if glow ~= part.glowOn then
     if glow then
@@ -604,9 +765,20 @@ local function StyledButton(inst, j, parts)
     local customBorder = NewCustomBorder(overlay, button)
     local glow, glowAnim = NewGlow(button)
 
+    -- Masque-style displays only. Registered even while the Masque group is
+    -- disabled, so enabling it later skins this button too. Masque draws its
+    -- frame art (Normal) on the button, under the cooldown swipe and our
+    -- overlay.
+    local ring
+    if UsesMasque(inst, inst.displays[j]) then
+      ring = NewRing(overlay)
+      pcall(inst.skin.AddButton, inst.skin, button,
+        { Icon = icon, Cooldown = cooldown, Count = count, Border = ring[1] }, "Aura", true)
+    end
+
     local part = {
-      button = button, icon = icon, cooldown = cooldown, borders = borders, borderOn = false, customBorder = customBorder,
-      plainBorders = plainBorders, plainOn = false,
+      button = button, icon = icon, cooldown = cooldown, count = count, borders = borders, borderOn = false,
+      customBorder = customBorder, plainBorders = plainBorders, plainOn = false, ring = ring, ringOn = false,
       glow = glow, glowAnim = glowAnim, glowOn = false, inst = inst,
     }
     table.insert(parts, part)
@@ -661,17 +833,17 @@ local function Name(frame, name)
   pcall(frame.SetParentKey, frame, addonName .. " " .. name)
 end
 
--- The missing icon's window: the icon's slot plus room for its glow on every
--- side. Fixed in size; Link places it.
-local function WindowSize(d)
-  return d.size + 2 * GlowPad(d)
+-- The missing icon's window: the icon's slot plus room for its glow (and a
+-- skin's art) on every side. Fixed in size; Link places it.
+local function WindowSize(d, skin)
+  return d.size + 2 * GlowPad(d, skin)
 end
 
 -- The slide container's one slot along the line: a step longer than the
 -- window, so the icon and glow leave it entirely when the aura shows up.
-local function SlideOptions(d, g)
+local function SlideOptions(d, g, skin)
   local options = GroupOptions(d, g, 0, false, 1)
-  local width, height = Slot(g, WindowSize(d) + 1, 1)
+  local width, height = Slot(g, WindowSize(d, skin) + 1, 1)
   options.layout = { elementWidth = width, elementHeight = height, elementSpacing = -1 }
   options.initializeFrame = MeasureOnly(width, height)
   return options
@@ -680,16 +852,30 @@ end
 -- The missing icon's look, which is all ours: no Blizzard restrictions.
 local function StyleMissing(inst)
   local d, icon = inst.display, inst.missingIcon
+  local skin = SkinData(inst, d)
   inst.window:SetAlpha(d.alpha)
-  local size = WindowSize(d)
+  local size = WindowSize(d, skin)
   inst.window:SetSize(size, size)
   inst.holder:SetSize(d.size, d.size)
   local ids = Chain.SpellIDs(d)
   local source = d.icon or (ids and next(ids)) -- an included ID
   icon:SetTexture(type(source) == "number" and C_Spell.GetSpellTexture(source) or source)
-  StyleIcon(icon, d)
-  StyleCustomBorder(inst.customBorder, d)
-  StyleGlow(inst.glow, d)
+  if skin then
+    if pcall(inst.skin.SetFrameSize, inst.skin, d.size, d.size, inst.holder) then
+      CopyRing(inst.ring)
+    end
+  elseif inst.ring then
+    icon:ClearAllPoints()
+    icon:SetAllPoints()
+  end
+  StyleIcon(icon, d, skin and SkinCrop(skin))
+  -- No aura, so no dispel color: the ring only ever carries a custom color.
+  if inst.ring then
+    inst.ring[1]:Hide()
+    inst.ring[2]:Hide()
+  end
+  StyleCustomBorder(inst.customBorder, d, skin and inst.ring)
+  StyleGlow(inst.glow, d, skin)
   -- Ours to play. It keeps looping while the icon is slid out of sight.
   ShowGlow(inst.glow, inst.glowAnim, inst.active and GlowNow(d))
   ApplyRange(inst.glow, d, inst.inRange)
@@ -700,8 +886,8 @@ end
 -- slots hold the first displays that have auras. The window is sized for the
 -- line's biggest icon, so a capped line wants one icon size. It reaches a
 -- fifth of an icon past the icons for borders and glows (dispel border: a
--- sixth, glow: a fifth), but on the far side only as far as the spacing allows
--- without showing the next icon or its border.
+-- sixth, glow: a fifth), or as far as a skin's art reaches, but on the far side
+-- only as far as the spacing allows without showing the next icon or its border.
 local function StyleCap(inst, g, cap)
   local size = 0
   for _, d in ipairs(inst.displays) do
@@ -709,6 +895,12 @@ local function StyleCap(inst, g, cap)
   end
   local spacing = inst.displays[1].spacing
   local reach = math.ceil(size / 5)
+  for _, d in ipairs(inst.displays) do
+    local skin = SkinData(inst, d)
+    if skin then
+      reach = math.max(reach, SkinReach(skin, size))
+    end
+  end
   local farReach = math.max(0, math.min(reach, spacing - reach))
   local width, height = Slot(g, reach + cap * (size + spacing) - spacing + farReach, size + 2 * reach)
   inst.capWindow:SetSize(width, height)
@@ -755,9 +947,9 @@ end
 -- display (keys d1, d2, ... in line order), hidden. `label` names its frames
 -- in /fstack, e.g. "MyDebuffs line 1". `cap`: show only that many icons (not
 -- for centered lines, whose shadow would measure the whole line). `plate`:
--- the line is on a nameplate host.
-function Chain.NewList(parent, unit, displays, g, lineSpacing, label, cap, plate)
-  local inst = { displays = displays, parts = {}, on = {}, inRange = true, plate = plate }
+-- the line is on a nameplate host. `skin`: the group's Masque group, or nil.
+function Chain.NewList(parent, unit, displays, g, lineSpacing, label, cap, plate, skin)
+  local inst = { displays = displays, parts = {}, on = {}, inRange = true, plate = plate, skin = skin }
   if cap and not g.shadow then
     inst.capWindow = CreateFrame("Frame", nil, parent, "DisableUntrustedLayoutScriptsTemplate")
     Name(inst.capWindow, label .. " (cap)")
@@ -796,15 +988,15 @@ end
 --   slide:    a second presence container whose slot is longer than the
 --             window. The icon and glow hang off its start corner, so when the
 --             aura shows up they move a full window back, out of sight.
-function Chain.NewMissing(parent, unit, d, g, lineSpacing, label, plate)
-  local inst = { display = d, displays = { d }, inRange = true, plate = plate }
+function Chain.NewMissing(parent, unit, d, g, lineSpacing, label, plate, skin)
+  local inst = { display = d, displays = { d }, inRange = true, plate = plate, skin = skin }
   inst.main = NewContainer(parent, unit, g)
   Name(inst.main, label .. " (presence)")
   AddGroup(inst, inst.main, 1, d, GroupOptions(d, g, lineSpacing, false, 1))
 
   inst.slide = NewContainer(parent, unit, g)
   Name(inst.slide, label .. " (slide)")
-  AddGroup(inst, inst.slide, 1, d, SlideOptions(d, g))
+  AddGroup(inst, inst.slide, 1, d, SlideOptions(d, g, SkinData(inst, d)))
 
   inst.window = CreateFrame("Frame", nil, parent, "DisableUntrustedLayoutScriptsTemplate")
   Name(inst.window, label .. " (missing icon)")
@@ -818,6 +1010,10 @@ function Chain.NewMissing(parent, unit, d, g, lineSpacing, label, plate)
   inst.missingIcon:SetAllPoints()
   inst.customBorder = NewCustomBorder(inst.holder)
   inst.glow, inst.glowAnim = NewGlow(inst.holder)
+  if UsesMasque(inst, d) then
+    inst.ring = NewRing(inst.holder)
+    pcall(skin.AddButton, skin, inst.holder, { Icon = inst.missingIcon, Border = inst.ring[1] }, "Aura", true)
+  end
   StyleMissing(inst)
 
   if g.shadow then
@@ -1054,7 +1250,7 @@ function Chain.Configure(inst, g, lineSpacing, cap)
     Reconfigure(inst.shadow, inst, function(d) return GroupOptions(d, g.shadow, lineSpacing, true, maxCount) end)
   end
   if inst.window then
-    Reconfigure(inst.slide, inst, function(d) return SlideOptions(d, g) end)
+    Reconfigure(inst.slide, inst, function(d) return SlideOptions(d, g, SkinData(inst, d)) end)
     StyleMissing(inst)
     return true
   end
@@ -1103,7 +1299,7 @@ function Chain.Link(inst, from, g, shadow)
     if not shadow then
       -- The window covers the icon's slot at `from`, plus the glow's reach
       -- back along the line and away from new lines (start is on the baseline).
-      local pad = GlowPad(d)
+      local pad = GlowPad(d, SkinData(inst, d))
       inst.window:ClearAllPoints()
       Anchor(inst.window, g.start, from.frame, from.point,
         from.x - (g.dx + g.cx) * pad, from.y - (g.dy + g.cy) * pad)
@@ -1214,6 +1410,18 @@ end
 function Chain.Release(inst)
   Chain.SetActive(inst, false)
   inst.active = nil
+  if inst.skin then
+    for _, parts in ipairs(inst.parts or {}) do
+      for _, part in ipairs(parts) do
+        if part.ring then
+          pcall(inst.skin.RemoveButton, inst.skin, part.button)
+        end
+      end
+    end
+    if inst.ring then
+      pcall(inst.skin.RemoveButton, inst.skin, inst.holder)
+    end
+  end
   local count = 0
   for _ in pairs({ Containers(inst) }) do
     count = count + 1

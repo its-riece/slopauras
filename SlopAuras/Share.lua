@@ -172,6 +172,7 @@ local SHARED = {
   desaturate = function() return Boolean end,
   dispelBorder = function() return Boolean end,
   borderStyle = function() return OneOf(Set("blizzard", "plain")) end,
+  skin = function() return OneOf(Set("masque", "none")) end,
   borderWidth = function() return Number(1, 8) end,
   borderColor = function()
     return function(value, path)

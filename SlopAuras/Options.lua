@@ -31,6 +31,9 @@ local TARGETS = {
 }
 local MODES = { list = "Matching auras", missing = "Icon when none match", loc = "Your loss of control" }
 
+-- Loaded before us (OptionalDeps), so this is settled at file load.
+local HAS_MASQUE = LibStub("Masque", true) ~= nil
+
 -- Refresh the panel, e.g. after the tree changed.
 local function Refresh()
   AceConfigRegistry:NotifyChange(addonName)
@@ -187,7 +190,7 @@ end
 
 local LOOK_KEYS = {
   "size", "spacing", "alpha", "zoom", "timerSize", "labelSize", "max", "sort", "sortReverse",
-  "desaturate", "dispelBorder", "borderColor", "borderStyle", "borderWidth", "hideTimer", "tint", "glow", "glowCombat", "glowInRange",
+  "desaturate", "dispelBorder", "borderColor", "skin", "borderStyle", "borderWidth", "hideTimer", "tint", "glow", "glowCombat", "glowInRange",
 }
 local LOAD_KEYS = {
   "class", "combat", "nameplateUnits", "knownSpell", "resting", "mounted", "hideWhenPlayerDead", "neverLoad",
@@ -500,6 +503,12 @@ local function SharedTabs(t, isDisplay)
     return type(t.borderColor) == "table" or t.dispelBorder == true
   end
 
+  -- Whether a Masque skin draws the icon's frame and border. A saved "masque"
+  -- without Masque loaded draws as skin "none".
+  local function IsMasque()
+    return HAS_MASQUE and t.skin == "masque"
+  end
+
   -- Three checkboxes over two keys: glowCombat ("always", "in", "out" or
   -- "never") and glowInRange (true hides the glow out of range).
   local function InCombat(value)
@@ -581,42 +590,45 @@ local function SharedTabs(t, isDisplay)
         set = function(_, r, g, b) Set("tint", { r, g, b }) end,
       },
       break2a = Break(8.01),
-      -- Saved as dispelBorder / borderColor (which color) and borderStyle (how
-      -- drawn). The editor asks style first: None, Blizzard or Plain.
-      borderStyle = {
-        type = "select", order = 8.02,
-        name = Label({ "dispelBorder", "borderColor", "borderStyle" }, "Border"),
-        values = { none = "None", blizzard = "Blizzard", plain = "Plain" },
-        sorting = { "none", "blizzard", "plain" },
-        get = function() return HasAnyBorder() and t.borderStyle or "none" end,
+      -- Two questions: what frames the icon (skin), and which color its border
+      -- has (dispelBorder / borderColor). With a Masque skin the skin draws
+      -- the border as its ring; without one, borderStyle says how we draw it.
+      skin = {
+        type = "select", order = 8.02, name = Label("skin", "Skin"),
+        values = { masque = "Masque", none = "None" },
+        sorting = { "masque", "none" },
+        hidden = function() return not HAS_MASQUE end,
+        get = function() return t.skin end,
+        set = function(_, value) Set("skin", value) end,
+      },
+      borderSource = {
+        type = "select", order = 8.021,
+        name = Label({ "dispelBorder", "borderColor" }, "Border"),
+        values = { none = "None", dispel = "Dispel color", custom = "Custom" },
+        sorting = { "none", "dispel", "custom" },
+        get = function()
+          return type(t.borderColor) == "table" and "custom" or t.dispelBorder == true and "dispel" or "none"
+        end,
+        -- A display saves false so it can override its group.
         set = function(_, value)
-          if value == "none" then
-            -- A display saves false so it can override its group.
-            t.dispelBorder, t.borderColor = Off(), Off()
+          if value == "custom" then
+            t.borderColor = { 1, 1, 1 }
+          elseif value == "dispel" then
+            t.borderColor, t.dispelBorder = Off(), true
           else
-            if not HasAnyBorder() then
-              t.dispelBorder = true
-            end
-            -- A display saves "blizzard" so it can override a group's plain.
-            t.borderStyle = (value ~= "blizzard" or isDisplay) and value or nil
+            t.borderColor, t.dispelBorder = Off(), Off()
           end
           Changed(false)
         end,
       },
-      borderSource = {
-        type = "select", order = 8.03, name = "Border color",
-        values = { dispel = "Dispel color", custom = "Custom" },
-        sorting = { "dispel", "custom" },
-        hidden = function() return not HasAnyBorder() end,
-        get = function() return type(t.borderColor) == "table" and "custom" or "dispel" end,
-        set = function(_, value)
-          if value == "custom" then
-            t.borderColor = { 1, 1, 1 }
-          else
-            t.borderColor, t.dispelBorder = Off(), true
-          end
-          Changed(false)
-        end,
+      borderStyle = {
+        type = "select", order = 8.03, name = Label("borderStyle", "Border style"),
+        values = { blizzard = "Blizzard", plain = "Plain" },
+        sorting = { "blizzard", "plain" },
+        hidden = function() return not HasAnyBorder() or IsMasque() end,
+        get = function() return t.borderStyle == "plain" and "plain" or "blizzard" end,
+        -- A display saves "blizzard" so it can override a group's plain.
+        set = function(_, value) Set("borderStyle", (value ~= "blizzard" or isDisplay) and value or nil) end,
       },
       break2ab = Break(8.04),
       borderColor = {
@@ -788,13 +800,19 @@ local function SharedTabs(t, isDisplay)
   look.args.glow.desc = Desc("glow")
   Resettable(look.args.sort, "sort")
   Resettable(look.args.tintMode, "tint")
+  look.args.skin.desc = Desc("skin", "Masque: the frame from the skin you pick for this group in Masque's options. "
+    .. "The border color goes on the skin's ring.")
+  Resettable(look.args.skin, "skin")
+  look.args.borderSource.desc = "Dispel color: by the aura's dispel type, red for none. "
+    .. "Custom: one color for every aura, missing icons included."
+  Resettable(look.args.borderSource, { "dispelBorder", "borderColor" })
   look.args.borderStyle.desc = Desc("borderStyle", "Blizzard: the game's soft border art. Plain: a solid outline "
     .. "in the exact color, as wide as Border width.")
-  Resettable(look.args.borderStyle, { "dispelBorder", "borderColor", "borderStyle" })
-  look.args.borderSource.desc = "Dispel color: by the aura's dispel type, red for none. "
-      .. "Custom: one color for every aura, missing icons included."
+  Resettable(look.args.borderStyle, "borderStyle")
   Resettable(look.args.borderColor, "borderColor")
-  look.args.borderWidth.hidden = function() return not HasAnyBorder() or t.borderStyle ~= "plain" end
+  look.args.borderWidth.hidden = function()
+    return not HasAnyBorder() or IsMasque() or t.borderStyle ~= "plain"
+  end
   Resettable(look.args.tint, "tint")
   Resettable(look.args.glowMode, "glow")
   Resettable(look.args.glow, "glow")

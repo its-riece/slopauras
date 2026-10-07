@@ -4,6 +4,7 @@
 ## Author: Riece
 ## Version: 0.1.0
 ## SavedVariables: SlopAurasDB
+## OptionalDeps: Masque
 ## IconTexture: 1500939
 
 Libs\LibStub\LibStub.lua

@@ -24,7 +24,11 @@ local DEFAULTS = {
   zoom = 0,
   timerSize = 12,
   labelSize = 12,
-  borderStyle = "blizzard", -- or "plain"
+  -- "masque": the group's Masque skin draws the frame and the border ring.
+  -- Masque loads first (OptionalDeps), so with it installed, it drives icons
+  -- unless a group or display says otherwise.
+  skin = LibStub("Masque", true) and "masque" or "none",
+  borderStyle = "blizzard", -- or "plain"; without a skin only
   borderWidth = 2, -- plain borders only
   lineSpacing = 2,
   nameplateUnits = "enemy",
@@ -125,7 +129,23 @@ end
 
 local rowConfigs = {}
 
+-- Which displays use Masque, as one string. Switching a display to or from
+-- "masque" changes its row's signature, but the editor sends that as an
+-- ordinary look change, so Apply compares this to catch it.
+local masqueFlags = ""
+
+local function MasqueFlags()
+  local flags = {}
+  for _, group in ipairs(ns.groups) do
+    for _, display in ipairs(group.displays) do
+      flags[#flags + 1] = display.skin == "masque" and "1" or "0"
+    end
+  end
+  return table.concat(flags)
+end
+
 local function ComputeRows()
+  masqueFlags = MasqueFlags()
   local rows = {}
   for _, group in ipairs(ns.groups) do
     local targets = TargetSet(group.target)
@@ -144,7 +164,9 @@ local function ComputeRows()
       local parts = { tostring(group), group.growth, lines, group.lineMax and "capped" or "" }
       for j, display in ipairs(group.displays) do
         local newLine = j > 1 and display.newLine and "/" or ""
-        table.insert(parts, newLine .. display.mode)
+        -- Only Masque-style displays' buttons are registered with Masque.
+        local masque = display.skin == "masque" and "+masque" or ""
+        table.insert(parts, newLine .. display.mode .. masque)
       end
       table.insert(rows, {
         group = group, targets = targets, lines = lines, signature = table.concat(parts, "|"),
@@ -237,6 +259,51 @@ local function SplitLines(group)
   return lines
 end
 
+-- Masque ---------------------------------------------------------------------
+-- One Masque group per SlopAuras group that has Masque-style displays, keyed
+-- by group id, so each group can have its own skin in Masque's options.
+local Masque = LibStub("Masque", true)
+local skins, skinNames = {}, {} -- group id -> Masque group, name it was given
+
+local function UsesMasque(group)
+  for _, display in ipairs(group.displays) do
+    if display.skin == "masque" then
+      return true
+    end
+  end
+  return false
+end
+
+local function SyncSkins()
+  if not Masque then
+    return
+  end
+  local live = {}
+  for _, group in ipairs(ns.groups) do
+    local id, name = tostring(group.id), group.name or "Group"
+    if UsesMasque(group) then
+      live[id] = true
+      if not skins[id] then
+        skins[id] = Masque:Group(addonName, name, id)
+        -- A skin or option change in Masque restyles every button.
+        skins[id]:RegisterCallback(function()
+          Chain.Reskinned()
+          ns.Changed(false)
+        end)
+      elseif skinNames[id] ~= name then
+        skins[id]:SetName(name)
+      end
+      skinNames[id] = name
+    end
+  end
+  for id, skin in pairs(skins) do
+    if not live[id] then
+      skin:Delete()
+      skins[id], skinNames[id] = nil, nil
+    end
+  end
+end
+
 local function BuildRow(config, host)
   local group = config.group
   local row = { group = group, g = Chain.Layout(group.growth, config.lines), signature = config.signature }
@@ -256,6 +323,7 @@ local function BuildRow(config, host)
   end
 
   local unit, name = host.unit or "player", group.name or "Group"
+  local skin = skins[tostring(group.id)]
   row.lines = SplitLines(group)
   for i, line in ipairs(row.lines) do
     -- Later lines start at their own 1px origin, anchored by Relink. It may be
@@ -272,13 +340,13 @@ local function BuildRow(config, host)
         displays[k] = entry.d
       end
       line.list = Chain.NewList(row.origin, unit, displays, row.g, group.lineSpacing, ("%s line %d"):format(name, i),
-        group.lineMax, host.kind == "nameplate")
+        group.lineMax, host.kind == "nameplate", skin)
     end
     line.missing = {}
     for _, entry in ipairs(line.missingDisplays) do
       local label = ("%s %d"):format(name, entry.j)
       table.insert(line.missing, entry.d.mode == "loc" and Chain.NewLoc(row.origin, unit, entry.d, row.g, label)
-        or Chain.NewMissing(row.origin, unit, entry.d, row.g, group.lineSpacing, label, host.kind == "nameplate"))
+        or Chain.NewMissing(row.origin, unit, entry.d, row.g, group.lineSpacing, label, host.kind == "nameplate", skin))
     end
   end
 
@@ -915,7 +983,8 @@ end
 -- Rebuilds rows whose structure changed, then pushes every setting to the
 -- containers that stay.
 local function Apply(structural)
-  if structural then
+  SyncSkins()
+  if structural or MasqueFlags() ~= masqueFlags then
     rowConfigs = ComputeRows()
     for _, host in ipairs(hosts) do
       SyncHost(host)
@@ -979,6 +1048,7 @@ local function RefreshGroupHosts()
 end
 
 local function Build()
+  SyncSkins()
   rowConfigs = ComputeRows()
   NewHost("player", "player")
   singleHosts.target = NewHost("target", "target")
