@@ -198,11 +198,10 @@ end
 
 -- Proc glow: Blizzard's action button proc loop, a 6x5 flipbook. Blizzard
 -- draws it at 1.4x the button (ActionButtonSpellAlerts.lua), where its inner
--- edge lands on the button's border art; our icons have no border, so it's
--- drawn at 1.6x to sit just outside the icon. Blizzard's border art reaches
--- past the icon (4/3 of it, see BORDER_SIZE), so with it the glow is larger
--- still; a plain border is thin enough to leave it. Missing icons have no
--- aura, so only a custom border shows on them.
+-- edge lands on the button's border art. Ours is drawn under the icon and
+-- its border (GlowSize): larger moves the ring outward and shows more of it,
+-- until a gap opens between border and ring; smaller hides it under the
+-- border. Missing icons have no aura, so only a custom border shows on them.
 --
 -- GlowPad is how far a missing icon's clip window reaches past each edge of
 -- the icon: the glow's reach plus 2px, so the clip never cuts the glow, or
@@ -241,13 +240,25 @@ local function BorderReach(d)
   return Plain(d) and PlainWidth(d) or math.ceil(d.size * (BORDER_SIZE - 1) / 2)
 end
 
-local function GlowScale(d)
-  return HasBorder(d) and not Plain(d) and 1.8 or 1.6
+-- Glow size, picked by eye. Plain strips sit outside the icon, so that glow
+-- is measured from their outer edge; Blizzard's art line hugs the icon's
+-- edge (the rest of BORDER_SIZE is padding), so that glow is measured from
+-- the icon.
+local GLOW_SCALE = 1.65 -- no border, or plain strips
+local GLOW_SCALE_ART = 1.75 -- Blizzard's border art
+
+local function GlowSize(d)
+  if not HasBorder(d) then
+    return d.size * GLOW_SCALE
+  elseif Plain(d) then
+    return (d.size + 2 * PlainWidth(d)) * GLOW_SCALE
+  end
+  return d.size * GLOW_SCALE_ART
 end
 
 -- How far the glow itself reaches past each edge of the icon.
 local function GlowReach(d)
-  return d.glow and math.ceil(d.size * (GlowScale(d) - 1) / 2) or 0
+  return d.glow and math.ceil((GlowSize(d) - d.size) / 2) or 0
 end
 
 local function GlowPad(d)
@@ -328,13 +339,15 @@ end
 -- A glow texture on `parent`, hidden, and the AnimationGroup that plays it.
 -- A stopped flipbook shows the whole atlas, so it's only shown while playing.
 local function NewGlow(parent)
-  -- Above the dispel borders (OVERLAY sublevel 0).
-  local texture = parent:CreateTexture(nil, "OVERLAY", nil, 7)
+  -- Under the icon (ARTWORK) and so under the borders, as Blizzard draws it
+  -- under the button: the icon hides the inside of the ring.
+  local texture = parent:CreateTexture(nil, "BACKGROUND")
   texture:SetPoint("CENTER")
-  -- Normal blending, as Blizzard draws it (ActionButtonSpellAlerts.xml). ADD
-  -- would brighten the faint edge pixels into a visible square and mix in the
-  -- icon's color underneath.
+  -- ADD: the flipbook has a dark band inside its ring, and where the icon
+  -- doesn't cover it, normal blending draws it as a black ring. Added, dark
+  -- pixels draw nothing.
   texture:SetAtlas("UI-HUD-ActionBar-Proc-Loop-Flipbook")
+  texture:SetBlendMode("ADD")
   texture:Hide()
   local anim = texture:CreateAnimationGroup()
   anim:SetLooping("REPEAT")
@@ -349,8 +362,7 @@ end
 -- d.glow: true for the atlas's own gold, { r, g, b } for a color. Tinting
 -- works on the desaturated art.
 local function StyleGlow(texture, d)
-  local scale = GlowScale(d)
-  local ok = pcall(texture.SetSize, texture, d.size * scale, d.size * scale)
+  local ok = pcall(texture.SetSize, texture, GlowSize(d), GlowSize(d))
   local color = type(d.glow) == "table" and d.glow
   ok = pcall(texture.SetDesaturated, texture, color and true or false) and ok
   if color then
@@ -549,7 +561,7 @@ local function StyledButton(inst, j, parts)
 
     local borders, plainBorders = NewDispelBorders(overlay, button)
     local customBorder = NewCustomBorder(overlay, button)
-    local glow, glowAnim = NewGlow(overlay)
+    local glow, glowAnim = NewGlow(button)
 
     local part = {
       button = button, icon = icon, cooldown = cooldown, borders = borders, borderOn = false, customBorder = customBorder,
