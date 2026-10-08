@@ -23,7 +23,6 @@ local DEFAULTS = {
   alpha = 1,
   zoom = 0,
   timerSize = 12,
-  labelSize = 12,
   -- "masque": the group's Masque skin draws the frame and the border ring.
   -- Masque loads first (OptionalDeps), so with it installed, it drives icons
   -- unless a group or display says otherwise.
@@ -68,6 +67,28 @@ local function Migrate(db)
   db.profiles, db.profileKeys = nil, nil
 end
 
+-- Display modes this version draws. A display saved with any other mode is
+-- dropped: SplitLines would otherwise draw it as an aura list.
+local MODES = { list = true, missing = true }
+-- Keys nothing reads any more. Export writes every raw key and import rejects
+-- unknown ones, so they're dropped too.
+local RETIRED_KEYS = { "locHide", "labelSize" }
+
+local function Clean(group)
+  for _, key in ipairs(RETIRED_KEYS) do
+    group[key] = nil
+  end
+  for j = #group.displays, 1, -1 do
+    local display = group.displays[j]
+    for _, key in ipairs(RETIRED_KEYS) do
+      display[key] = nil
+    end
+    if display.mode ~= nil and not MODES[display.mode] then
+      table.remove(group.displays, j)
+    end
+  end
+end
+
 local function LoadSettings()
   SlopAurasDB = SlopAurasDB or {}
   ns.db = SlopAurasDB
@@ -76,6 +97,7 @@ local function LoadSettings()
   for _, group in ipairs(ns.db.groups) do
     group.id = group.id or ns.NewGroupID()
     group.displays = group.displays or {}
+    Clean(group)
     -- A group without anchorTo gets the one its anchor implies: a frame name
     -- -> that frame; party/raid/nameplate units -> each unit's frame; else the screen.
     if not group.anchorTo then
@@ -244,8 +266,8 @@ local function EachInst(row)
 end
 
 -- Splits a group's displays into lines: a display with newLine starts the
--- next one. Missing-icon and loss-of-control displays have their own frames
--- and sit after the line's list displays.
+-- next one. Missing-icon displays have their own frames and sit after the
+-- line's list displays.
 local function SplitLines(group)
   local lines, line = {}, nil
   for j, d in ipairs(group.displays) do
@@ -253,8 +275,7 @@ local function SplitLines(group)
       line = { listDisplays = {}, missingDisplays = {} }
       table.insert(lines, line)
     end
-    local own = d.mode == "missing" or d.mode == "loc"
-    table.insert(own and line.missingDisplays or line.listDisplays, { d = d, j = j })
+    table.insert(d.mode == "missing" and line.missingDisplays or line.listDisplays, { d = d, j = j })
   end
   return lines
 end
@@ -345,8 +366,8 @@ local function BuildRow(config, host)
     line.missing = {}
     for _, entry in ipairs(line.missingDisplays) do
       local label = ("%s %d"):format(name, entry.j)
-      table.insert(line.missing, entry.d.mode == "loc" and Chain.NewLoc(row.origin, unit, entry.d, row.g, label)
-        or Chain.NewMissing(row.origin, unit, entry.d, row.g, group.lineSpacing, label, host.kind == "nameplate", skin))
+      table.insert(line.missing,
+        Chain.NewMissing(row.origin, unit, entry.d, row.g, group.lineSpacing, label, host.kind == "nameplate", skin))
     end
   end
 
@@ -679,21 +700,9 @@ local function Shows(d)
   return true
 end
 
--- The game announces new and changed loss of control (LOSS_OF_CONTROL_*), but
--- an entry running out may pass quietly, so each shown one also gets a
--- recheck just after it ends.
-local CheckLoc
-
-local function ScheduleLoc(remaining)
-  if remaining and remaining > 0 then
-    C_Timer.After(remaining + 0.1, function() CheckLoc() end)
-  end
-end
-
 -- A list display hiding or showing turns its aura group off or on; the line's
--- container closes the gap itself. Only a whole line container, a missing
--- display or a loss-of-control display appearing or disappearing needs a
--- relink.
+-- container closes the gap itself. Only a whole line container or a missing
+-- display appearing or disappearing needs a relink.
 local function UpdateLine(line)
   local changed = false
   local list = line.list
@@ -715,11 +724,6 @@ local function UpdateLine(line)
   end
   for _, inst in ipairs(line.missing) do
     local on = Shows(inst.display)
-    if on and inst.loc then
-      local remaining
-      on, remaining = Chain.UpdateLoc(inst)
-      ScheduleLoc(remaining)
-    end
     if on ~= inst.active then
       inst.active = on
       Chain.SetActive(inst, on)
@@ -752,18 +756,6 @@ local function Batch(fn)
   fn()
   batching = false
   FlushRelinks()
-end
-
--- Loss of control is only readable for the player: the player's own host and
--- the party frame showing you.
-function CheckLoc()
-  Batch(function()
-    for _, host in ipairs(hosts) do
-      if host.unit == "player" then
-        UpdateHost(host)
-      end
-    end
-  end)
 end
 
 local function RefreshHost(host)
@@ -1083,18 +1075,12 @@ events:RegisterEvent("PLAYER_TARGET_CHANGED")
 events:RegisterEvent("GROUP_ROSTER_UPDATE")
 events:RegisterEvent("NAME_PLATE_UNIT_ADDED")
 events:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
-events:RegisterUnitEvent("LOSS_OF_CONTROL_ADDED", "player")
-events:RegisterUnitEvent("LOSS_OF_CONTROL_UPDATE", "player")
 if C_EventUtils.IsEventValid("PLAYER_FOCUS_CHANGED") then
   events:RegisterEvent("PLAYER_FOCUS_CHANGED")
 end
 
 events:SetScript("OnEvent", function(_, event, arg)
-  if event == "LOSS_OF_CONTROL_ADDED" or event == "LOSS_OF_CONTROL_UPDATE" then
-    if built then
-      CheckLoc()
-    end
-  elseif event == "NAME_PLATE_UNIT_ADDED" then
+  if event == "NAME_PLATE_UNIT_ADDED" then
     if built then
       OnPlateAdded(arg)
     end

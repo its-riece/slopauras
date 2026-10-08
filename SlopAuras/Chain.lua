@@ -1024,186 +1024,6 @@ function Chain.NewMissing(parent, unit, d, g, lineSpacing, label, plate, skin)
   return inst
 end
 
--- Loss of control --------------------------------------------------------------
--- A display fed by C_LossOfControl instead of an aura container: the player's
--- current loss of control (stun, fear, silence, school lockout...), with the
--- game's text for it ("Stunned"). GetActiveLossOfControlData has no secret
--- tags for the player (LossOfControlDocumentation.lua); for other units it's
--- secret (SecretWhenLossOfControlInfoRestricted), so this only shows on
--- "player". Lua knows when it shows, so it joins a line like any display that
--- a condition turns on and off.
-
--- The checkboxes: each hides these locTypes. Types not listed always show.
-Chain.LOC_TYPES = {
-  { key = "stun", label = "Stun", types = { STUN = true, STUN_MECHANIC = true } },
-  { key = "fear", label = "Fear", types = { FEAR = true, FEAR_MECHANIC = true } },
-  { key = "confuse", label = "Incapacitate", types = { CONFUSE = true } },
-  { key = "charm", label = "Charm", types = { CHARM = true, POSSESS = true } },
-  { key = "silence", label = "Silence", types = { SILENCE = true, PACIFYSILENCE = true } },
-  { key = "pacify", label = "Pacify", types = { PACIFY = true } },
-  { key = "disarm", label = "Disarm", types = { DISARM = true } },
-  { key = "root", label = "Root", types = { ROOT = true } },
-  { key = "interrupt", label = "Interrupted (school lockout)", types = { SCHOOL_INTERRUPT = true } },
-}
-
-local function LocHidden(d, locType)
-  for _, key in ipairs(d.locHide or {}) do
-    for _, entry in ipairs(Chain.LOC_TYPES) do
-      if entry.key == key and entry.types[locType] then
-        return true
-      end
-    end
-  end
-  return false
-end
-
--- The first active entry (index 1 is the one the game ranks highest) that
--- the display doesn't hide and the game means to show with a timer. The
--- second result is true when an entry passed over for that has an aura other
--- than the shown entry's: the border container can't tell such auras apart,
--- so it could show theirs.
-local function LocEntry(d)
-  local shown, skipped
-  for i = 1, C_LossOfControl.GetActiveLossOfControlDataCount() do
-    local data = C_LossOfControl.GetActiveLossOfControlData(i)
-    if data then
-      if data.displayText and data.startTime and not LocHidden(d, data.locType) then
-        shown = shown or data
-      elseif data.auraInstanceID then
-        skipped = skipped or {}
-        skipped[data.auraInstanceID] = true
-      end
-    end
-  end
-  if skipped and shown and shown.auraInstanceID then
-    skipped[shown.auraInstanceID] = nil
-  end
-  return shown, skipped ~= nil and next(skipped) ~= nil
-end
-
--- Dispel border for loss of control. The aura behind an entry is known
--- (auraInstanceID), but in combat addon code can't ask for its dispel type:
--- C_UnitAuras.GetAuraDispelTypeColor errors ("Auras cannot be accessed when
--- secret while tainted"). So a one-slot aura container on the player sits
--- under the icon, its button carrying only the dispel border, and Blizzard
--- picks the art. It shows the crowd control aura with the most time left,
--- which is the game's own tiebreak between entries of equal priority
--- (LossOfControlFrame.lua); a stun and a fear at once can disagree.
-local LOC_BORDER_FILTER = AuraUtil.CreateFilterString(AuraUtil.AuraFilters.Harmful, AuraUtil.AuraFilters.CrowdControl)
-
-local function LocBorderOptions(inst)
-  local d = inst.display
-  return {
-    maxFrameCount = 1,
-    sortMethod = AuraContainerSortMethod.ExpirationOnly,
-    sortDirection = AuraContainerSortDirection.Reverse,
-    layout = { elementWidth = d.size, elementHeight = d.size, elementSpacing = 0 },
-    initializeFrame = function(button)
-      button:EnableMouse(false)
-      button:SetSize(inst.display.size, inst.display.size)
-      local borders, plainBorders = NewDispelBorders(button, button)
-      local part = { button = button, borders = borders, plainBorders = plainBorders, borderOn = false, plainOn = false }
-      table.insert(inst.borderParts, part)
-      StyleDispelBorders(part, inst.display)
-    end,
-  }
-end
-
-
-local function StyleLoc(inst)
-  local d = inst.display
-  inst.frame:SetAlpha(d.alpha)
-  inst.icon:SetSize(d.size, d.size)
-  local ok = pcall(inst.borderBox.SetAuraGroupLayout, inst.borderBox, Key(1), LocBorderOptions(inst).layout)
-  for _, part in ipairs(inst.borderParts) do
-    ok = pcall(part.button.SetSize, part.button, d.size, d.size) and ok
-    ok = StyleDispelBorders(part, d) and ok
-  end
-  StyleCustomBorder(inst.customBorder, d)
-  inst.shownSpell, inst.borderShown = nil, nil -- the next update redraws, borders included
-  StyleIcon(inst.icon, d)
-  inst.cooldown:SetHideCountdownNumbers(d.hideTimer == true)
-  local text = inst.cooldown:GetCountdownFontString()
-  if text then
-    inst.timerFont = inst.timerFont or { text:GetFont() }
-    local face, _, flags = unpack(inst.timerFont)
-    if face then
-      pcall(text.SetFont, text, face, d.timerSize, flags)
-    end
-  end
-  local face, _, flags = inst.label:GetFont()
-  if face then
-    inst.label:SetFont(face, d.labelSize, flags)
-  end
-  return ok
-end
-
-function Chain.NewLoc(parent, unit, d, g, label)
-  local inst = { display = d, displays = { d }, loc = true, unit = unit }
-  -- Anchored after aura containers, hence the template.
-  inst.frame = CreateFrame("Frame", nil, parent, "DisableUntrustedLayoutScriptsTemplate")
-  Name(inst.frame, label .. " (loss of control)")
-  inst.frame:Hide()
-  inst.icon = inst.frame:CreateTexture(nil, "ARTWORK")
-  inst.icon:SetPoint(g.start, inst.frame, g.start)
-  inst.cooldown = CreateFrame("Cooldown", nil, inst.frame, "CooldownFrameTemplate")
-  inst.cooldown:SetAllPoints(inst.icon)
-  inst.cooldown:SetDrawEdge(false)
-  inst.cooldown:SetReverse(true)
-  -- The game's text for it, under the icon. It takes no room in the line.
-  inst.label = inst.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  inst.label:SetPoint("TOP", inst.icon, "BOTTOM", 0, -2)
-  -- Borders on a frame above the cooldown, whose swipe would cover them.
-  local overlay = CreateFrame("Frame", nil, inst.frame)
-  overlay:SetAllPoints()
-  overlay:SetFrameLevel(inst.cooldown:GetFrameLevel() + 1)
-  inst.customBorder = NewCustomBorder(overlay, inst.icon)
-  -- Its one button lands on the icon (flow anchor and container anchor are
-  -- both the icon's start corner).
-  inst.borderParts = {}
-  inst.borderBox = NewContainer(overlay, unit, g, inst.icon)
-  Name(inst.borderBox, label .. " (loss of control border)")
-  inst.borderBox:AddAuraGroup(Key(1), LOC_BORDER_FILTER, LocBorderOptions(inst))
-  StyleLoc(inst)
-  return inst
-end
-
--- Refreshes the icon, timer and text from the game. Returns whether there's
--- anything to show and, when the entry is new, its seconds remaining.
-function Chain.UpdateLoc(inst)
-  local data, conflict
-  if inst.unit == "player" then
-    data, conflict = LocEntry(inst.display)
-  end
-  if not data then
-    inst.shownSpell, inst.shownStart = nil, nil
-    return false
-  end
-  local new = data.spellID ~= inst.shownSpell or data.startTime ~= inst.shownStart
-  if new then
-    inst.shownSpell, inst.shownStart = data.spellID, data.startTime
-    inst.icon:SetTexture(data.iconTexture)
-    CooldownFrame_Set(inst.cooldown, data.startTime, data.duration, true)
-    local text = data.displayText
-    if data.locType == "SCHOOL_INTERRUPT" and data.lockoutSchool and data.lockoutSchool ~= 0 then
-      text = LOSS_OF_CONTROL_DISPLAY_INTERRUPT_SCHOOL:format(C_Spell.GetSchoolString(data.lockoutSchool))
-    end
-    inst.label:SetText(text)
-  end
-  -- No aura behind a school lockout, and a skipped entry's aura could take
-  -- the slot: either way any border would be another CC's. Checked on every
-  -- update, since a skipped entry can come and go under the same shown one.
-  -- Showing and enabling a container are allowed in combat.
-  local d = inst.display
-  local border = d.dispelBorder == true and not CustomBorder(d) and data.auraInstanceID ~= nil and not conflict
-  if border ~= inst.borderShown then
-    inst.borderShown = border
-    inst.borderBox:SetShown(border)
-    inst.borderBox:SetEnabled(border)
-  end
-  return true, new and data.timeRemaining or nil
-end
-
 -- `optionsFor(d)` gives each display's aura group options. The candidate
 -- filter, sort and layout setters rebuild or relayout the container even when
 -- the value is the same (Blizzard_CustomAuraContainer.lua), and the editor
@@ -1238,9 +1058,6 @@ end
 -- capped needs a new line; `cap` (the number) can change here.
 -- Returns false if Blizzard refused part of the restyle.
 function Chain.Configure(inst, g, lineSpacing, cap)
-  if inst.loc then
-    return StyleLoc(inst)
-  end
   local maxCount = inst.window and 1 or nil
   if inst.capWindow and cap then
     StyleCap(inst, g, cap)
@@ -1271,20 +1088,6 @@ end
 -- Places a line's container (or its shadow) at `from` ({ frame, point, x, y })
 -- and returns where the next one starts.
 function Chain.Link(inst, from, g, shadow)
-  if inst.loc then
-    -- Only placed while it shows, so it simply takes one slot. In the
-    -- shadow pass it adds half a slot to the measured half line.
-    local d = inst.display
-    local length = shadow and (d.size + d.spacing) / 2 or d.size + d.spacing
-    if not shadow then
-      inst.frame:ClearAllPoints()
-      Anchor(inst.frame, g.start, from.frame, from.point, from.x, from.y)
-      local width, height = Slot(g, length, d.size)
-      inst.frame:SetSize(width, height)
-    end
-    return { frame = from.frame, point = from.point, x = from.x + g.dx * length, y = from.y + g.dy * length }
-  end
-
   local container = shadow and inst.shadow or inst.main
   container:ClearAllPoints()
 
@@ -1325,10 +1128,6 @@ end
 
 -- Shows or hides a whole line container or missing display.
 function Chain.SetActive(inst, active)
-  if inst.loc then
-    inst.frame:SetShown(active)
-    return
-  end
   Toggle(inst.main, active)
   Toggle(inst.shadow, active)
   if inst.capWindow then
@@ -1348,9 +1147,6 @@ end
 -- `inRange`: UnitInRange's secret answer for the unit, or true. Works in combat.
 function Chain.SetRange(inst, inRange)
   inst.inRange = inRange
-  if inst.loc then
-    return
-  end
   if inst.window then
     ApplyRange(inst.glow, inst.display, inRange)
     return
@@ -1365,9 +1161,6 @@ end
 -- After SetCombat. Only glows that depend on combat are touched; restarting
 -- the rest would make every glow skip.
 function Chain.UpdateCombatGlows(inst)
-  if inst.loc then
-    return
-  end
   if inst.window then
     local d = inst.display
     if d.glowCombat == "in" or d.glowCombat == "out" then
@@ -1394,7 +1187,7 @@ function Chain.SetDisplayActive(inst, j, active)
 end
 
 local function Containers(inst)
-  return inst.main, inst.shadow, inst.slide, inst.borderBox
+  return inst.main, inst.shadow, inst.slide
 end
 
 function Chain.SetUnit(inst, unit)

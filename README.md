@@ -19,7 +19,7 @@ Some familiarity with AuraFilters and a novice understanding of AuraContainers i
 
 ## Features
 
-Most of the ways you'd wanna manipulate auras are covered. Includes helpers for stuff like multiple ranks of spells and icons for missing auras (where the game lets you). Also supports loss of control displays which felt aura-adjacent-enough to want here.
+Most of the ways you'd wanna manipulate auras are covered. Includes helpers for stuff like multiple ranks of spells and icons for missing auras (where the game lets you).
 
 Visibility filtering is pretty good: class, combat state, spells you do or don't know, lots of other stuff.
 

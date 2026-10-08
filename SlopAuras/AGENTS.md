@@ -13,7 +13,7 @@ Load order is the `.toc` order.
 |---|---|
 | `Libs/` | LibStub, CallbackHandler, AceGUI-3.0, AceConfig-3.0 (editor only). |
 | `Ranks.lua` | Spell rank families (class spells), generated from talentsforever.com data (CC BY 4.0, credited in the file). Regenerate rather than hand-edit. `ns.SpellRanks(id)`. |
-| `Chain.lua` | Builds a group's lines out of AuraContainers and links them; buttons, borders, glow, missing icons, loss of control. No saved-data knowledge beyond a display's keys. |
+| `Chain.lua` | Builds a group's lines out of AuraContainers and links them; buttons, borders, glow, missing icons. No saved-data knowledge beyond a display's keys. |
 | `SlopAuras.lua` | Saved settings and inheritance (`DEFAULTS`, `ns.Prepare`), rows and hosts, show/hide conditions, applying editor changes, events. |
 | `Share.lua` | Import/export strings: validation, export, import. |
 | `Options.lua` | The in-game editor (`/slop`), an AceConfig options table. |
@@ -52,9 +52,7 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
   displays by filter and dispel type instead.
 - **Addon code can't look up an aura's dispel type in combat**:
   `C_UnitAuras.GetAuraDispelTypeColor` errors when called from tainted code while auras are
-  secret. Loss of control gets its border from a one-slot aura container under its icon
-  (`HARMFUL|CROWD_CONTROL`, longest remaining first) whose button carries only the dispel
-  border.
+  secret. Dispel borders come from textures handed to aura buttons (`AddDispelTypeTexture`).
 - **Range is secret**: `UnitInRange` feeds `SetAlphaFromBoolean` on the glow.
 - Edit Mode fills every container with placeholder auras (`editModePreviewEnabled` in the
   template). SlopAuras keeps that preview on.
@@ -63,7 +61,7 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
 
 - **Group:** placement (`target`, `anchorTo`, `anchor`, `growth`, `lines`, `lineSpacing`,
   `lineMax`) and an ordered `displays` list. Any display key on a group is a default.
-- **Display:** one aura group in a line (or a missing / loss-of-control icon).
+- **Display:** one aura group in a line (or a missing icon).
 - **Inheritance:** display → group → `DEFAULTS`, via metatables (`ns.Prepare`). SlopAuras
   saves only raw values. Read a display's own value with `rawget` when inheritance would
   give the wrong answer (`name`, the editor's asterisks).
@@ -86,8 +84,6 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
   the aura is missing), a fixed clip window, and a slide container that moves the icon out
   of the window when the aura shows up (`NewMissing`, `Link`). They draw at the end of
   their line.
-- **Loss of control** (`mode = "loc"`) reads `C_LossOfControl` for the player only (other
-  units are secret), on its own frame at the end of the line.
 - **Centering** (`growth = "CENTER"`, or `"CENTER_VERTICAL"` for a column): Lua can't halve
   a secret width, so each container has a half-size shadow copy. The shadows chain backwards
   from the center (left, or up), and the visible line starts where they end.
@@ -169,15 +165,19 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
 ## Saved keys
 
 Shared (group or display): `filter`, `size`, `spacing`, `alpha`, `zoom`, `timerSize`,
-`labelSize`, `max`, `sort`, `sortReverse`, `desaturate`, `tint`, `dispelBorder`,
+`max`, `sort`, `sortReverse`, `desaturate`, `tint`, `dispelBorder`,
 `borderColor`, `skin`, `borderStyle`, `borderWidth`, `hideTimer`, `glow`, `glowCombat` (`"never"`
 too), `glowInRange`, `combat`, `neverLoad`, `knownSpell` (an ID or list; negative = must not
 know; at least one positive must be known), `hideWhenPlayerDead`, `class`, `nameplateUnits`,
 `resting` and `mounted` (`true` only while, `false` only while not, `"any"`), `hideWhenDead`,
 `hideWhenOffline`, `hideWhenNotVisible`.
 
-Display only: `name`, `mode` (`list`, `missing`, `loc`), `newLine`, `spellIDs` and
-`rankSpellIDs` (sets `{ [id] = true }`, `false` = exclude), `dispelTypes`, `icon`, `locHide`.
+Display only: `name`, `mode` (`list`, `missing`), `newLine`, `spellIDs` and
+`rankSpellIDs` (sets `{ [id] = true }`, `false` = exclude), `dispelTypes`, `icon`.
+
+On load, `LoadSettings` drops displays with any other `mode` and the retired keys in
+`RETIRED_KEYS` (SlopAuras.lua). A key that stops being used goes there, so old saves still
+export strings that import accepts.
 
 Group only: `id`, `name`, `target`, `anchorTo`, `anchor` (`{ point, frameName, relativePoint,
 x, y }`), `growth`, `lines`, `lineSpacing`, `lineMax`, `displays`.

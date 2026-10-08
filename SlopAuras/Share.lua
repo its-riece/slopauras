@@ -165,7 +165,6 @@ local SHARED = {
   alpha = function() return Number(0, 1) end,
   zoom = function() return Number(0, 1) end,
   timerSize = function() return Number(6, 32) end,
-  labelSize = function() return Number(6, 32) end,
   max = function() return Number(1, 40) end,
   sort = function() return OneOf(Sorts()) end,
   sortReverse = function() return Boolean end,
@@ -253,14 +252,7 @@ local DISPLAY_ONLY = {
       return value
     end
   end,
-  mode = function() return OneOf(Set("list", "missing", "loc")) end,
-  locHide = function()
-    local keys = {}
-    for _, entry in ipairs(ns.Chain.LOC_TYPES) do
-      keys[entry.key] = true
-    end
-    return ListOf(keys)
-  end,
+  mode = function() return OneOf(Set("list", "missing")) end,
   newLine = function() return Boolean end,
   spellIDs = function() return SpellIDs end,
   rankSpellIDs = function() return SpellIDs end,

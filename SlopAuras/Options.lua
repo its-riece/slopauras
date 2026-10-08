@@ -29,7 +29,7 @@ local TARGETS = {
   { "focus", "Your focus" }, { "party", "Party members" },
   { "raid", "Raid members" }, { "nameplate", "Nameplates" },
 }
-local MODES = { list = "Matching auras", missing = "Icon when none match", loc = "Your loss of control" }
+local MODES = { list = "Matching auras", missing = "Icon when none match" }
 
 -- Loaded before us (OptionalDeps), so this is settled at file load.
 local HAS_MASQUE = LibStub("Masque", true) ~= nil
@@ -170,8 +170,6 @@ local function DisplayLabel(display)
   end
   if display.mode == "missing" then
     label = "Missing: " .. label
-  elseif display.mode == "loc" then
-    label = "Loss of control"
   end
   return label
 end
@@ -189,7 +187,7 @@ end
 -- button clears them all.
 
 local LOOK_KEYS = {
-  "size", "spacing", "alpha", "zoom", "timerSize", "labelSize", "max", "sort", "sortReverse",
+  "size", "spacing", "alpha", "zoom", "timerSize", "max", "sort", "sortReverse",
   "desaturate", "dispelBorder", "borderColor", "skin", "borderStyle", "borderWidth", "hideTimer", "tint", "glow", "glowCombat", "glowInRange",
 }
 local LOAD_KEYS = {
@@ -295,9 +293,9 @@ end
 -- Adds the Pick filters button at `order`, a warning when the filter has no
 -- HELPFUL or HARMFUL, and the checkboxes under it to `args`. get() returns the filter the boxes show; set(text) saves one, ""
 -- when nothing is ticked.
-local function AddFilterPicker(args, order, key, get, set, hidden)
+local function AddFilterPicker(args, order, key, get, set)
   args.filterPick = {
-    type = "execute", order = order, width = 0.8, hidden = hidden,
+    type = "execute", order = order, width = 0.8,
     name = function() return openPicker == key and "Hide" or "Pick filters" end,
     func = function()
       openPicker = openPicker ~= key and key or nil
@@ -346,12 +344,12 @@ local function AddFilterPicker(args, order, key, get, set, hidden)
   args.filterWarning = {
     type = "description", order = order + 0.005, width = "full", fontSize = "medium",
     name = "|cffff9933Add HELPFUL (buffs) or HARMFUL (debuffs), or this filter matches nothing.|r",
-    hidden = function() return HasAuraType(get()) or (hidden and hidden()) end,
+    hidden = function() return HasAuraType(get()) end,
   }
 
   args.filterPicker = {
     type = "group", inline = true, order = order + 0.01, name = "Filter",
-    hidden = function() return openPicker ~= key or (hidden and hidden()) end,
+    hidden = function() return openPicker ~= key end,
     args = pickArgs,
   }
 end
@@ -463,15 +461,9 @@ local function SharedTabs(t, isDisplay)
     end
   end
 
-  -- Loss-of-control displays draw their own icon: no aura buttons, so no
-  -- glow, and one icon at a time.
-  local function IsLoc()
-    return isDisplay and t.mode == "loc"
-  end
-
   -- For settings about a list of aura icons.
   local function ListOnly()
-    return isDisplay and (t.mode == "missing" or t.mode == "loc")
+    return isDisplay and t.mode == "missing"
   end
 
   local function Reset(keys, order, tab)
@@ -528,7 +520,7 @@ local function SharedTabs(t, isDisplay)
   local function GlowWhenBox()
     return {
       type = "group", inline = true, order = 8.4, name = "Glow when",
-      hidden = function() return IsLoc() or not t.glow end,
+      hidden = function() return not t.glow end,
       args = {
         inCombat = Resettable({
           type = "toggle", order = 1, width = 1.5, name = Label("glowCombat", "In combat", true),
@@ -564,9 +556,6 @@ local function SharedTabs(t, isDisplay)
       break1 = Break(3.9),
       zoom = Range("zoom", 4, "Zoom", 0, 1, 0.01, true),
       timerSize = Range("timerSize", 4.1, "Timer text size", 6, 32, 1),
-      labelSize = Range("labelSize", 4.2, "Text size", 6, 32, 1),
-      -- Max icons shows only in list mode and labelSize only in loss of
-      -- control mode, so this row never holds more than three sliders.
       max = Range("max", 4.3, "Max icons", 1, 40, 1),
       break1b = Break(4.9),
       sort = {
@@ -668,13 +657,9 @@ local function SharedTabs(t, isDisplay)
   look.args.timerSize.hidden = function() return isDisplay and t.mode == "missing" end
   -- Its own `disabled` replaces the panel's combat lock, so it repeats it.
   look.args.timerSize.disabled = function() return ns.Locked() or t.hideTimer == true end
-  look.args.labelSize.hidden = function() return not IsLoc() end
-  look.args.labelSize.desc = Desc("labelSize", "The game's text for the loss of control, such as \"Stunned\", under the icon.")
   look.args.max.hidden = ListOnly
   look.args.sort.hidden = ListOnly
   look.args.sortReverse.hidden = ListOnly
-  look.args.glowMode.hidden = IsLoc
-  look.args.glow.hidden = function() return IsLoc() or type(t.glow) ~= "table" end
 
   -- About you and where you are. A group's classes decide whether it loads at
   -- all (structural); a display's only hide that display.
@@ -804,7 +789,7 @@ local function SharedTabs(t, isDisplay)
     .. "The border color goes on the skin's ring.")
   Resettable(look.args.skin, "skin")
   look.args.borderSource.desc = "Dispel color: by the aura's dispel type, red for none. "
-    .. "Custom: one color for every aura, missing icons included."
+      .. "Custom: one color for every aura, missing icons included."
   Resettable(look.args.borderSource, { "dispelBorder", "borderColor" })
   look.args.borderStyle.desc = Desc("borderStyle", "Blizzard: the game's soft border art. Plain: a solid outline "
     .. "in the exact color, as wide as Border width.")
@@ -1193,37 +1178,6 @@ local function DispelTypesBox(display)
   return { type = "group", inline = true, order = 6.5, name = "Dispel types", args = args }
 end
 
--- Checkboxes for a loss-of-control display's types, two per row. Saved as the
--- unticked ones (display.locHide), so a type not listed here still shows.
-local function LocTypesBox(display)
-  local args = {}
-  for i, entry in ipairs(ns.Chain.LOC_TYPES) do
-    local key = entry.key
-    args[key] = {
-      type = "toggle", order = i, width = 1.5, name = entry.label,
-      get = function() return not tContains(display.locHide or {}, key) end,
-      set = function(_, on)
-        local hide = display.locHide or {}
-        if on then
-          tDeleteItem(hide, key)
-        else
-          table.insert(hide, key)
-        end
-        display.locHide = #hide > 0 and hide or nil
-        Changed(false)
-      end,
-    }
-    if i % 2 == 0 then
-      args["break" .. i] = Break(i + 0.5)
-    end
-  end
-  return {
-    type = "group", inline = true, order = 6.6, name = "Show these",
-    hidden = function() return display.mode ~= "loc" end,
-    args = args,
-  }
-end
-
 local function DisplayOptions(group, display, index)
   local list = group.displays
 
@@ -1310,7 +1264,6 @@ local function DisplayOptions(group, display, index)
         hidden = function() return rawget(display, "rankSpellIDs") == nil end,
       },
       dispelTypes = DispelTypesBox(display),
-      locTypes = LocTypesBox(display),
       icon = {
         type = "input", order = 7, name = "Icon",
         desc = "A spell ID or texture path. Leave empty to use the icon of one of this display's spell IDs.",
@@ -1327,10 +1280,6 @@ local function DisplayOptions(group, display, index)
     },
   }
 
-  -- A loss-of-control display reads the game's loss-of-control list, not
-  -- auras, so the aura matching settings don't apply to it.
-  local function IsLoc() return display.mode == "loc" end
-  what.args.filter.hidden = IsLoc
   -- Shows the group's filter when the display has none; a result equal
   -- to the group's keeps the display following the group.
   AddFilterPicker(what.args, 2.05, display, function() return display.filter end, function(text)
@@ -1339,15 +1288,8 @@ local function DisplayOptions(group, display, index)
       display.filter = text
     end
     Changed(false)
-  end, IsLoc)
-  what.args.spellIDs.hidden = IsLoc
-  what.args.spellNames.hidden = function() return IsLoc() or rawget(display, "spellIDs") == nil end
-  what.args.rankSpellIDs.hidden = IsLoc
-  what.args.rankSpellNames.hidden = function() return IsLoc() or rawget(display, "rankSpellIDs") == nil end
-  what.args.dispelTypes.hidden = IsLoc
-  what.args.mode.desc = "\"Icon when none match\" and \"Your loss of control\" draw at the end of their line, "
-      .. "after the line's other icons. \"Your loss of control\" shows what Blizzard's loss of control alert shows, "
-      .. "with its text, and only works for you."
+  end)
+  what.args.mode.desc = "\"Icon when none match\" draws at the end of its line, after the line's other icons."
 
   local look, load = SharedTabs(display, true)
   look.order, load.order = 2, 3
