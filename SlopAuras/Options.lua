@@ -1972,7 +1972,8 @@ end
 
 function ns.InitOptions()
   LibStub("AceConfig-3.0"):RegisterOptionsTable(addonName, Options)
-  local _, categoryID = AceConfigDialog:AddToBlizOptions(addonName, "SlopAuras")
+  AceConfigDialog:AddToBlizOptions(addonName, "SlopAuras")
+  AceConfigDialog:SetDefaultSize(addonName, 900, 640)
   hooksecurefunc(AceConfigDialog, "FeedGroup", function(_, appName, _, container, _, path)
     if appName ~= addonName then
       return
@@ -1992,15 +1993,15 @@ function ns.InitOptions()
     end
   end)
   SLASH_SLOPAURAS1 = "/slop"
+  -- Toggles AceConfigDialog's own window. Unlike the game's settings panel
+  -- (C_SettingsUtil.OpenSettingsPanel refuses addon calls in combat), it opens
+  -- in combat too; the editor stays locked until combat ends (ns.Locked).
   SlashCmdList.SLOPAURAS = function()
-    -- The game refuses to open its settings panel for an addon in combat
-    -- (C_SettingsUtil.OpenSettingsPanel, HasRestrictions). Esc > Options still
-    -- works then, since that click isn't addon code.
-    if InCombatLockdown() then
-      print(addonName .. ": settings can't open in combat. Try again after the fight.")
-      return
+    if AceConfigDialog.OpenFrames[addonName] then
+      AceConfigDialog:Close(addonName)
+    else
+      AceConfigDialog:Open(addonName)
     end
-    Settings.OpenToCategory(categoryID)
   end
 end
 

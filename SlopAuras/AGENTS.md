@@ -143,6 +143,8 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
 
 ## The editor (Options.lua)
 
+- `/slop` toggles AceConfigDialog's standalone window; the same options table also sits
+  in the game's Options → AddOns. `Refresh` (`NotifyChange`) redraws whichever is open.
 - Options.lua rebuilds its AceConfig options table from `ns.groups` on every redraw.
   Per-page UI state (open import boxes, pickers) lives in upvalues keyed by page.
 - Tree: each group has a gold "Settings" entry (tabs) followed by its displays. A node can't
