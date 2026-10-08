@@ -2,7 +2,7 @@
 ## Title: SlopAuras
 ## Notes: Rows of aura icons with any filter, on any frame.
 ## Author: Riece
-## Version: 0.1.0
+## Version: 0.2.0
 ## SavedVariables: SlopAurasDB
 ## OptionalDeps: Masque
 ## IconTexture: 1500939
