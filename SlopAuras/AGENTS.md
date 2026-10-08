@@ -92,7 +92,7 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
 - **Centering** (`growth = "CENTER"`, or `"CENTER_VERTICAL"` for a column): Lua can't halve
   a secret width, so each container has a half-size shadow copy. The shadows chain backwards
   from the center (left, or up), and the visible line starts where they end.
-- **Show at most per line** (`lineMax`): the line's container sits in a clip window anchored to its
+- **Show only the first** (`lineMax`, per line): the line's container sits in a clip window anchored to its
   own start.
 - **Wrapping lines** (`wrap` on the display that starts a line): the container's flow layout
   wraps by length (`Chain.SetWrap`), so the next line follows its last row. Only for lines

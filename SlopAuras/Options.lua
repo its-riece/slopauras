@@ -1624,9 +1624,9 @@ local function PlacementTab(group)
       },
       break1 = Break(3.4),
       lineMax = {
-        type = "range", order = 3.5, name = "Show at most per line", min = 0, max = 40, step = 1,
-        desc = "Shows only the first icons of each line, in display order. 0: no limit. "
-            .. "Works best when every icon on the line is the same size. Not for centered growth.",
+        type = "range", order = 3.5, name = "Show only the first", min = 0, max = 40, step = 1,
+        desc = "Shows only this many icons per line: the first displays that have auras, in display order. "
+            .. "0: no limit. Works best when every icon on the line is the same size. Not for centered growth.",
         -- A line can't both wrap and cap.
         hidden = function() return group.growth == "CENTER" or group.growth == "CENTER_VERTICAL" or AnyWraps(group) end,
         get = function() return group.lineMax or 0 end,
