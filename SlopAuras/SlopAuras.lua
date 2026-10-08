@@ -280,6 +280,30 @@ local function SplitLines(group)
   return lines
 end
 
+-- Whether every strand of the group's rows is a single row (Strand): on each
+-- unit's own frame, or one single unit. Lines in longer strands keep a fixed
+-- height (PlaceLine), so they can't wrap.
+local SINGLE_UNITS = { player = true, target = true, focus = true }
+
+function ns.SingleRow(group)
+  if group.anchorTo == "unit" then
+    return true
+  end
+  local targets = type(group.target) == "table" and group.target or { group.target }
+  return #targets == 1 and SINGLE_UNITS[targets[1]] == true
+end
+
+-- How many icons a line's rows hold, or nil for one row: the wrap of the
+-- display that starts it. A line with missing displays keeps one row (missing
+-- icons chain after the first row, and the line's height is fixed), and so
+-- does a capped group.
+local function LineWrap(group, line)
+  if #line.missingDisplays > 0 or group.lineMax or not ns.SingleRow(group) then
+    return nil
+  end
+  return line.listDisplays[1].d.wrap
+end
+
 -- Masque ---------------------------------------------------------------------
 -- One Masque group per SlopAuras group that has Masque-style displays, keyed
 -- by group id, so each group can have its own skin in Masque's options.
@@ -362,6 +386,7 @@ local function BuildRow(config, host)
       end
       line.list = Chain.NewList(row.origin, unit, displays, row.g, group.lineSpacing, ("%s line %d"):format(name, i),
         group.lineMax, host.kind == "nameplate", skin)
+      Chain.SetWrap(line.list, LineWrap(group, line))
     end
     line.missing = {}
     for _, entry in ipairs(line.missingDisplays) do
@@ -989,6 +1014,11 @@ local function Apply(structural)
         PlaceOrigin(row, host)
         for inst in EachInst(row) do
           Chain.Configure(inst, row.g, row.group.lineSpacing, row.group.lineMax)
+        end
+        for _, line in ipairs(row.lines) do
+          if line.list then
+            Chain.SetWrap(line.list, LineWrap(row.group, line))
+          end
         end
       end
       UpdateRange(host) -- new rows start out in range

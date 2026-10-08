@@ -254,6 +254,7 @@ local DISPLAY_ONLY = {
   end,
   mode = function() return OneOf(Set("list", "missing")) end,
   newLine = function() return Boolean end,
+  wrap = function() return Number(1, 40) end,
   spellIDs = function() return SpellIDs end,
   rankSpellIDs = function() return SpellIDs end,
   icon = function()

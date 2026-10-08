@@ -803,7 +803,8 @@ local function GroupOptions(d, g, lineSpacing, half, maxCount, init)
     candidateFilters = Candidates(d),
     sortMethod = AuraContainerSortMethod[d.sort] or AuraContainerSortMethod.Default,
     sortDirection = d.sortReverse and AuraContainerSortDirection.Reverse or AuraContainerSortDirection.Normal,
-    layout = { elementWidth = width, elementHeight = height, elementSpacing = -1 },
+    -- lineSpacing: rows a wrapping line starts overlap by 1px too.
+    layout = { elementWidth = width, elementHeight = height, elementSpacing = -1, lineSpacing = -1 },
     initializeFrame = init or MeasureOnly(width, height),
   }
 end
@@ -977,6 +978,20 @@ function Chain.NewList(parent, unit, displays, g, lineSpacing, label, cap, plate
     StyleCap(inst, g, cap)
   end
   return inst
+end
+
+-- `wrap`: start a new row after that many icons, or nil for one row. The
+-- container wraps by length (AnchorUtil.ApplyFlowLayout), measured in the
+-- line's first display's slots: slots overlap by 1px, so n icons measure
+-- n * (size + spacing) + 1. A shadow's slots are exactly half as long, so it
+-- wraps at the same icon. The rows grow the way new lines go. Out of combat.
+function Chain.SetWrap(inst, wrap)
+  local d = inst.displays[1]
+  local step = d.size + d.spacing
+  inst.main:SetFlowLayoutMaximumLineSize(wrap and wrap * step + 1 or nil)
+  if inst.shadow then
+    inst.shadow:SetFlowLayoutMaximumLineSize(wrap and wrap * step / 2 + 1 or nil)
+  end
 end
 
 -- One missing-icon display, for one unit, hidden. Lua can't know whether the

@@ -153,6 +153,36 @@ end
 
 -- Displays -------------------------------------------------------------------
 
+-- Whether display `index` starts a line that can wrap (LineWrap in
+-- SlopAuras.lua): the line has no missing displays, the group isn't capped,
+-- and its lines aren't shared by several units.
+local function CanWrap(group, index)
+  local list = group.displays
+  if (index > 1 and not list[index].newLine) or group.lineMax or not ns.SingleRow(group) then
+    return false
+  end
+  for j = index, #list do
+    if j > index and list[j].newLine then
+      break
+    end
+    if list[j].mode == "missing" then
+      return false
+    end
+  end
+  return true
+end
+
+-- Whether any line of the group wraps. A saved wrap that doesn't apply (the
+-- display no longer starts a line, say) doesn't count.
+local function AnyWraps(group)
+  for j, display in ipairs(group.displays) do
+    if rawget(display, "wrap") and CanWrap(group, j) then
+      return true
+    end
+  end
+  return false
+end
+
 -- A display's own name, or one made from its spell, filter or mode. rawget:
 -- a display without a name would read its group's through the metatable.
 local function DisplayLabel(display)
@@ -183,17 +213,7 @@ end
 -- Every control shows the value in effect. On a display, a value of its own
 -- has an asterisk on its label, and the tooltip says where the value comes
 -- from; changing a control makes the value the display's own. Right-clicking a
--- control clears it (HookWidgets), and the tab's "Reset to group settings"
--- button clears them all.
-
-local LOOK_KEYS = {
-  "size", "spacing", "alpha", "zoom", "timerSize", "max", "sort", "sortReverse",
-  "desaturate", "dispelBorder", "borderColor", "skin", "borderStyle", "borderWidth", "hideTimer", "tint", "glow", "glowCombat", "glowInRange",
-}
-local LOAD_KEYS = {
-  "class", "combat", "nameplateUnits", "knownSpell", "resting", "mounted", "hideWhenPlayerDead", "neverLoad",
-  "hideWhenDead", "hideWhenOffline", "hideWhenNotVisible",
-}
+-- control clears it (HookWidgets).
 
 local function ClassValues()
   local values = {}
@@ -355,7 +375,8 @@ local function AddFilterPicker(args, order, key, get, set)
 end
 
 -- Returns the Appearance and Load conditions tabs for `t`, a group or a display.
-local function SharedTabs(t, isDisplay)
+-- `extra`: controls only a display has, placed in the Appearance sections.
+local function SharedTabs(t, isDisplay, extra)
   -- On a display, an asterisk marks the display's own values; unmarked ones
   -- come from the group. It contrasts with the label: white after the yellow
   -- labels above sliders and dropdowns, yellow after a checkbox's white one.
@@ -466,31 +487,6 @@ local function SharedTabs(t, isDisplay)
     return isDisplay and t.mode == "missing"
   end
 
-  local function Reset(keys, order, tab)
-    return {
-      type = "execute", order = order, name = "Reset to group settings", hidden = not isDisplay,
-      confirm = function() return ("Reset %s's %s tab to the group's settings?"):format(DisplayLabel(t), tab) end,
-      desc = "Drops this display's values on this tab and goes back to the group's.",
-      disabled = function()
-        if ns.Locked() then
-          return true
-        end
-        for _, key in ipairs(keys) do
-          if rawget(t, key) ~= nil then
-            return false
-          end
-        end
-        return true
-      end,
-      func = function()
-        for _, key in ipairs(keys) do
-          t[key] = nil
-        end
-        Changed(false)
-      end,
-    }
-  end
-
   local function HasAnyBorder()
     return type(t.borderColor) == "table" or t.dispelBorder == true
   end
@@ -556,7 +552,7 @@ local function SharedTabs(t, isDisplay)
       break1 = Break(3.9),
       zoom = Range("zoom", 4, "Zoom", 0, 1, 0.01, true),
       timerSize = Range("timerSize", 4.1, "Timer text size", 6, 32, 1),
-      max = Range("max", 4.3, "Max icons", 1, 40, 1),
+      max = Range("max", 4.3, "Show at most", 1, 40, 1),
       break1b = Break(4.9),
       sort = {
         type = "select", order = 6, name = Label("sort", "Sort"), desc = Desc("sort"), values = SortValues(),
@@ -650,7 +646,6 @@ local function SharedTabs(t, isDisplay)
       desaturate = Toggle("desaturate", 9, "Desaturate"),
       hideTimer = Toggle("hideTimer", 10, "Hide timer"),
       break4 = Break(10.9),
-      reset = Reset(LOOK_KEYS, 13, "Appearance"),
     },
   }
   look.args.zoom.desc = Desc("zoom", "Crops the icon's edges. At 0% you see the whole texture, including the border drawn into it.")
@@ -776,7 +771,6 @@ local function SharedTabs(t, isDisplay)
     args = {
       you = you,
       unit = unit,
-      reset = Reset(LOAD_KEYS, 3, "Load conditions"),
     },
   }
 
@@ -805,6 +799,68 @@ local function SharedTabs(t, isDisplay)
   Resettable(you.args.nameplateUnits, "nameplateUnits")
   Resettable(you.args.knownSpell, "knownSpell")
   Resettable(unit.args.hideWhenNotVisible, "hideWhenNotVisible")
+
+  -- The Appearance controls in sections, each row ended explicitly. A row,
+  -- or a section, whose controls are all hidden is hidden too. `extra`: a
+  -- display's own controls (Start a new line, Icons per row).
+  local controls = look.args
+  for key, option in pairs(extra or {}) do
+    controls[key] = option
+  end
+  local function Hidden(option)
+    local hidden = option.hidden
+    if type(hidden) == "function" then
+      return hidden()
+    end
+    return hidden == true
+  end
+  local function AllHidden(options)
+    for _, option in ipairs(options) do
+      if not Hidden(option) then
+        return false
+      end
+    end
+    return true
+  end
+  local function Section(order, name, rows)
+    local args, all, n = {}, {}, 0
+    for r, row in ipairs(rows) do
+      local options = {}
+      for _, key in ipairs(row) do
+        local option = controls[key]
+        if option then
+          n = n + 1
+          option.order = n
+          args[key] = option
+          table.insert(options, option)
+          table.insert(all, option)
+        end
+      end
+      if #options > 0 then
+        n = n + 1
+        local rowBreak = Break(n)
+        rowBreak.hidden = function() return AllHidden(options) end
+        args["break" .. r] = rowBreak
+      end
+    end
+    return {
+      type = "group", inline = true, order = order, name = name, args = args,
+      hidden = function() return AllHidden(all) end,
+    }
+  end
+  look.args = {
+    layout = Section(1, "Layout", {
+      { "newLine" }, { "max", "wrap", "spacing" }, { "sort", "sortReverse" },
+    }),
+    icon = Section(2, "Icon", {
+      { "size", "zoom", "alpha" }, { "tintMode" }, { "tint" }, { "desaturate" },
+    }),
+    timer = Section(3, "Timer", { { "timerSize" }, { "hideTimer" } }),
+    border = Section(4, "Border", {
+      { "skin", "borderSource", "borderStyle" }, { "borderWidth" }, { "borderColor" },
+    }),
+    glow = Section(5, "Glow", { { "glowMode" }, { "glow" }, { "glowWhen" } }),
+  }
 
   return look, load
 end
@@ -1224,16 +1280,6 @@ local function DisplayOptions(group, display, index)
           Changed(false)
         end,
       },
-      breakNewLine = { type = "description", order = 2.1, name = "", width = "full", hidden = index == 1 },
-      newLine = {
-        type = "toggle", order = 2.2, width = 1.5, name = "Start a new line", hidden = index == 1,
-        desc = "Puts this display and the ones after it on a new line. The group's Placement tab sets where new lines go.",
-        get = function() return rawget(display, "newLine") == true end,
-        set = function(_, value)
-          display.newLine = value or nil
-          Changed(true)
-        end,
-      },
       spellIDs = {
         type = "input", order = 3, width = "full", name = "Spell IDs (exact)",
         desc = "Separate IDs with commas. Matches these IDs only. Put ! before an ID to hide that spell instead: !12345. "
@@ -1291,7 +1337,28 @@ local function DisplayOptions(group, display, index)
   end)
   what.args.mode.desc = "\"Icon when none match\" draws at the end of its line, after the line's other icons."
 
-  local look, load = SharedTabs(display, true)
+  local look, load = SharedTabs(display, true, {
+    newLine = {
+      type = "toggle", width = 1.5, name = "Start a new line", hidden = index == 1,
+      desc = "Puts this display and the ones after it on a new line. The group's Placement tab sets where new lines go.",
+      get = function() return rawget(display, "newLine") == true end,
+      set = function(_, value)
+        display.newLine = value or nil
+        Changed(true)
+      end,
+    },
+    wrap = {
+      type = "range", name = "Icons per row", min = 0, max = 40, step = 1,
+      desc = "Starts another row of this line after this many icons. 0: one row. "
+          .. "Counts icons at this display's size, so bigger icons later in the line fit fewer to a row.",
+      hidden = function() return not CanWrap(group, index) end,
+      get = function() return rawget(display, "wrap") or 0 end,
+      set = function(_, value)
+        display.wrap = value > 0 and value or nil
+        Changed(false)
+      end,
+    },
+  })
   look.order, load.order = 2, 3
 
   return {
@@ -1417,8 +1484,8 @@ local function PlacementTab(group)
 
   local frameGet, frameSet = AnchorField(group, 2, "")
 
-  return {
-    type = "group", order = 2, name = "Placement",
+  local lines = {
+    type = "group", inline = true, order = 1, name = "Lines",
     args = {
       growth = {
         type = "select", order = 1, name = "Grow", values = GROWTHS, sorting = GROWTH_ORDER,
@@ -1450,17 +1517,23 @@ local function PlacementTab(group)
       },
       break1 = Break(3.4),
       lineMax = {
-        type = "range", order = 3.5, name = "Icons per line", min = 0, max = 40, step = 1,
+        type = "range", order = 3.5, name = "Show at most per line", min = 0, max = 40, step = 1,
         desc = "Shows only the first icons of each line, in display order. 0: no limit. "
             .. "Works best when every icon on the line is the same size. Not for centered growth.",
-        hidden = function() return group.growth == "CENTER" or group.growth == "CENTER_VERTICAL" end,
+        -- A line can't both wrap and cap.
+        hidden = function() return group.growth == "CENTER" or group.growth == "CENTER_VERTICAL" or AnyWraps(group) end,
         get = function() return group.lineMax or 0 end,
         set = function(_, value)
           group.lineMax = value > 0 and value or nil
           Changed(true)
         end,
       },
-      break1b = Break(3.9),
+    },
+  }
+
+  local anchor = {
+    type = "group", inline = true, order = 2, name = "Anchor",
+    args = {
       anchorTo = {
         type = "select", order = 4, name = "Anchor to",
         values = { unit = "Each unit's own frame", screen = "Screen", frame = "A named frame" },
@@ -1486,6 +1559,8 @@ local function PlacementTab(group)
       y = AnchorRange(5, 9, "Y"),
     },
   }
+
+  return { type = "group", order = 2, name = "Placement", args = { lines = lines, anchor = anchor } }
 end
 
 -- One checkbox per unit kind, two per row, in TARGETS order. A multiselect
@@ -1549,10 +1624,6 @@ local function GroupOptions(group, index)
     group.filter = text ~= "" and text or nil
     Changed(false)
   end)
-  look.args.intro = {
-    type = "description", order = -1, width = "full",
-    name = "The group's displays use these values. Change one on a display to give that display its own.",
-  }
 
   -- Above the Settings tabs, so they show on every tab. An inline group with
   -- no name is drawn without a box or title.

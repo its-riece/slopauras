@@ -87,8 +87,12 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
 - **Centering** (`growth = "CENTER"`, or `"CENTER_VERTICAL"` for a column): Lua can't halve
   a secret width, so each container has a half-size shadow copy. The shadows chain backwards
   from the center (left, or up), and the visible line starts where they end.
-- **Icons per line** (`lineMax`): the line's container sits in a clip window anchored to its
+- **Show at most per line** (`lineMax`): the line's container sits in a clip window anchored to its
   own start.
+- **Wrapping lines** (`wrap` on the display that starts a line): the container's flow layout
+  wraps by length (`Chain.SetWrap`), so the next line follows its last row. Only for lines
+  without missing displays, in uncapped groups whose strands are a single row
+  (`ns.SingleRow`, `LineWrap`): other lines keep a fixed height.
 - **Anchoring:** `anchorTo = "unit"` rows hang off the host's frame (unit frames, compact
   party/raid frames, the nameplate itself, not Blizzard's UnitFrame inside it, which
   nameplate addons hide). Screen/frame rows of all hosts join one strand (`Strand`).
@@ -140,6 +144,9 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
   have both tree children and tabs, so selecting a group redirects to its Settings entry (a
   `FeedGroup` hook). Displays are keyed by position (`d1`, `d2`...).
 - Right-click on a control clears a display's own value (`HookWidgets`, `Resettable`).
+- Appearance is built flat in `SharedTabs`, then grouped into sections (Layout, Icon,
+  Timer, Border, Glow) by `Section` at its end: a new Appearance control needs a row
+  there too, or it won't show. Placement has Lines and Anchor sections.
 - AceConfigDialog lays controls out left to right and wraps; numeric widths are multiples
   of 170px; a tab group fills to the panel bottom (nothing can sit below it); a description
   has one font size.
@@ -172,7 +179,8 @@ know; at least one positive must be known), `hideWhenPlayerDead`, `class`, `name
 `resting` and `mounted` (`true` only while, `false` only while not, `"any"`), `hideWhenDead`,
 `hideWhenOffline`, `hideWhenNotVisible`.
 
-Display only: `name`, `mode` (`list`, `missing`), `newLine`, `spellIDs` and
+Display only: `name`, `mode` (`list`, `missing`), `newLine`, `wrap` (icons per row on
+the line this display starts), `spellIDs` and
 `rankSpellIDs` (sets `{ [id] = true }`, `false` = exclude), `dispelTypes`, `icon`.
 
 On load, `LoadSettings` drops displays with any other `mode` and the retired keys in
@@ -188,8 +196,8 @@ x, y }`), `growth`, `lines`, `lineSpacing`, `lineMax`, `displays`.
 2. Use it where it acts (`Chain.Configure` / `StyleButton` for looks, `Shows` for
    conditions). A key `StyleButton` reads also goes in `STYLE_KEYS` (Chain.lua):
    `Configure` skips buttons whose keys there haven't changed.
-3. A control in Options.lua, added to `LOOK_KEYS` or `LOAD_KEYS` so "Reset to
-   group settings" clears it, and wrapped in `Resettable` for right-click.
+3. A control in Options.lua, wrapped in `Resettable` for right-click. An Appearance
+   control also gets a row in its section (`Section` calls in `SharedTabs`).
 4. A validator in Share.lua's spec tables, plus `SharedValue` if the saved form differs
    from JSON.
 5. Update "Saved keys" above.
