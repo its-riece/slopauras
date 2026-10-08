@@ -1416,6 +1416,27 @@ local function DisplayOptions(group, display, index)
         type = "description", order = 6, name = function() return DescribeIDs(rawget(display, "rankSpellIDs"), true) end,
         hidden = function() return rawget(display, "rankSpellIDs") == nil end,
       },
+      maxDuration = {
+        type = "input", order = 6.2, name = "Maximum aura duration",
+        desc = "In seconds. Matches auras whose full duration is this long or shorter, however much time they have left. "
+            .. "Auras without a duration don't match. Leave empty for no limit.",
+        validate = function(_, value)
+          local seconds = tonumber(value)
+          if strtrim(value) ~= "" and not (seconds and seconds >= 1 and seconds <= 86400) then
+            return "Enter a number of seconds, or leave it empty."
+          end
+          return true
+        end,
+        get = function()
+          local seconds = rawget(display, "maxDuration")
+          return seconds and tostring(seconds) or ""
+        end,
+        set = function(_, value)
+          display.maxDuration = tonumber(value)
+          Changed(false)
+        end,
+      },
+      breakMaxDuration = Break(6.3),
       dispelTypes = DispelTypesBox(display),
       icon = {
         type = "input", order = 7, name = "Icon",

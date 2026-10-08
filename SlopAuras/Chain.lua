@@ -167,6 +167,7 @@ local candidateCache = setmetatable({}, { __mode = "k" })
 
 local function Candidates(d)
   local inputs = SetText(d.spellIDs) .. "/" .. SetText(d.rankSpellIDs) .. "/" .. table.concat(d.dispelTypes or {}, ",")
+      .. "/" .. tostring(d.maxDuration)
   local cached = candidateCache[d]
   if cached and cached.inputs == inputs then
     return cached.filters
@@ -177,6 +178,9 @@ local function Candidates(d)
   -- Blizzard_AuraContainerUtil.lua); elsewhere the exclusion is skipped.
   filters.includeSpellIDs, filters.excludeSpellIDs = Chain.SpellIDs(d)
   DispelFilter(d, filters)
+  -- Compared with the aura's full duration, not the time left, on any unit
+  -- (outside the spell ID gate). Any value also drops auras with no duration.
+  filters.maxDuration = d.maxDuration
   filters = next(filters) and filters or nil
   candidateCache[d] = { inputs = inputs, filters = filters }
   return filters

@@ -190,7 +190,8 @@ know; at least one positive must be known), `hideWhenPlayerDead`, `class`, `name
 
 Display only: `name`, `mode` (`list`, `missing`), `newLine`, `wrap` (icons per row on
 the line this display starts), `spellIDs` and
-`rankSpellIDs` (sets `{ [id] = true }`, `false` = exclude), `dispelTypes`, `icon`.
+`rankSpellIDs` (sets `{ [id] = true }`, `false` = exclude), `dispelTypes`, `maxDuration`
+(seconds, the container's `maxDuration` candidate filter), `icon`.
 
 On load, `LoadSettings` drops displays with any other `mode` and the retired keys in
 `RETIRED_KEYS` (SlopAuras.lua). A key that stops being used goes there, so old saves still

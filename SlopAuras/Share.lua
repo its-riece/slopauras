@@ -285,6 +285,7 @@ local DISPLAY_ONLY = {
   wrap = function() return Number(1, 40) end,
   spellIDs = function() return SpellIDs end,
   rankSpellIDs = function() return SpellIDs end,
+  maxDuration = function() return Number(1, 86400) end,
   icon = function()
     return function(value, path)
       if type(value) == "number" or (type(value) == "string" and value ~= "") then
