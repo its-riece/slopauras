@@ -1378,9 +1378,9 @@ local function DisplayOptions(group, display, index)
       breakMode = Break(1.5),
       filter = {
         type = "input", order = 2, width = 1.5, name = "Filter",
-        desc = "Leave empty to use the group's filter. Join tokens with | and put ! before one to exclude it: HARMFUL|!CROWD_CONTROL",
+        desc = "Join tokens with | and put ! before one to exclude it: HARMFUL|!CROWD_CONTROL. Empty means HELPFUL.",
         validate = ValidateFilter,
-        get = function() return rawget(display, "filter") or "" end,
+        get = function() return display.filter end,
         set = function(_, value)
           value = CleanFilter(value)
           display.filter = value ~= "" and value or nil
@@ -1454,13 +1454,8 @@ local function DisplayOptions(group, display, index)
     },
   }
 
-  -- Shows the group's filter when the display has none; a result equal
-  -- to the group's keeps the display following the group.
   AddFilterPicker(what.args, 2.05, display, function() return display.filter end, function(text)
-    display.filter = nil
-    if text ~= "" and text ~= display.filter then
-      display.filter = text
-    end
+    display.filter = text ~= "" and text or nil
     Changed(false)
   end)
   what.args.mode.desc = "\"Icon when none match\" draws at the end of its line, after the line's other icons."
@@ -1588,8 +1583,11 @@ local function ListField(group, key, structural)
 end
 
 
+-- A new display starts with the last display's filter: displays in one group
+-- usually match the same aura type.
 local function AddDisplay(group)
-  table.insert(group.displays, { mode = "list" })
+  local last = group.displays[#group.displays]
+  table.insert(group.displays, { mode = "list", filter = last and rawget(last, "filter") })
   ns.Prepare(group)
   Changed(true)
 end
@@ -1738,20 +1736,6 @@ local function GroupOptions(group, index)
 
   local look, load = SharedTabs(group, false)
   look.order, load.order = 3, 4
-  general.args.filter = {
-    type = "input", order = 3, width = 1.5, name = "Filter", validate = ValidateFilter,
-    desc = "Which auras the displays show. A display with its own filter uses that instead.",
-    get = function() return group.filter end,
-    set = function(_, value)
-      value = CleanFilter(value)
-      group.filter = value ~= "" and value or nil -- empty: back to the default
-      Changed(false)
-    end,
-  }
-  AddFilterPicker(general.args, 3.1, group, function() return group.filter end, function(text)
-    group.filter = text ~= "" and text or nil
-    Changed(false)
-  end)
 
   -- Above the Settings tabs, so they show on every tab. An inline group with
   -- no name is drawn without a box or title.

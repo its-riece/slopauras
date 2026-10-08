@@ -168,7 +168,6 @@ end
 -- Keys a display and its group can both hold (on a group: defaults for its
 -- displays). Checks are built when used, since some read game tables.
 local SHARED = {
-  filter = function() return Filter end,
   size = function() return Number(8, 128) end,
   spacing = function() return Number(0, 40) end,
   alpha = function() return Number(0, 1) end,
@@ -281,6 +280,7 @@ local DISPLAY_ONLY = {
     end
   end,
   mode = function() return OneOf(Set("list", "missing")) end,
+  filter = function() return Filter end,
   newLine = function() return Boolean end,
   wrap = function() return Number(1, 40) end,
   spellIDs = function() return SpellIDs end,
@@ -381,6 +381,9 @@ function ValidateDisplay(value, path)
 end
 
 local function ValidateGroup(value, path)
+  if type(value) == "table" then
+    ns.MoveGroupFilter(value)
+  end
   local group = ValidateTable(value, path, SHARED, GROUP_ONLY)
   if not group.name then
     Fail(path, "needs a name")

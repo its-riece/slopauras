@@ -89,7 +89,24 @@ local MODES = { list = true, missing = true }
 -- unknown ones, so they're dropped too.
 local RETIRED_KEYS = { "locHide", "labelSize" }
 
+-- Filters belong to displays only. A group's filter, from older saves and
+-- import strings, moves to each display without its own. Also takes
+-- unvalidated import tables, hence the type checks.
+function ns.MoveGroupFilter(group)
+  local filter = group.filter
+  group.filter = nil
+  if type(filter) ~= "string" or type(group.displays) ~= "table" then
+    return
+  end
+  for _, display in ipairs(group.displays) do
+    if type(display) == "table" and rawget(display, "filter") == nil then
+      display.filter = filter
+    end
+  end
+end
+
 local function Clean(group)
+  ns.MoveGroupFilter(group)
   for _, key in ipairs(RETIRED_KEYS) do
     group[key] = nil
   end

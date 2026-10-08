@@ -177,7 +177,7 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
 
 ## Saved keys
 
-Shared (group or display): `filter`, `size`, `spacing`, `alpha`, `zoom`,
+Shared (group or display): `size`, `spacing`, `alpha`, `zoom`,
 `max`, `sort`, `sortReverse`, `desaturate`, `hideSwipe`, `tint`, `dispelBorder`,
 `borderColor`, `skin`, `borderStyle`, `borderWidth`, `hideTimer`, `hideStacks`, and per text
 (`timer…` for the countdown, `stack…` for the count): `Size`, `Font` (a LibSharedMedia name,
@@ -188,7 +188,8 @@ know; at least one positive must be known), `hideWhenPlayerDead`, `class`, `name
 `resting` and `mounted` (`true` only while, `false` only while not, `"any"`), `hideWhenDead`,
 `hideWhenOffline`, `hideWhenNotVisible`.
 
-Display only: `name`, `mode` (`list`, `missing`), `newLine`, `wrap` (icons per row on
+Display only: `name`, `mode` (`list`, `missing`), `filter` (absent = `"HELPFUL"`; a group
+`filter` from older saves or strings moves to its displays, `ns.MoveGroupFilter`), `newLine`, `wrap` (icons per row on
 the line this display starts), `spellIDs` and
 `rankSpellIDs` (sets `{ [id] = true }`, `false` = exclude), `dispelTypes`, `maxDuration`
 (seconds, the container's `maxDuration` candidate filter), `icon`.
