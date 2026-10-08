@@ -199,7 +199,8 @@ On load, `LoadSettings` drops displays with any other `mode` and the retired key
 export strings that import accepts.
 
 Group only: `id`, `name`, `target`, `anchorTo`, `anchor` (`{ point, frameName, relativePoint,
-x, y }`), `growth`, `lines`, `lineSpacing`, `lineMax`, `displays`.
+x, y }`), `growth`, `lines`, `lineSpacing`, `lineMax`, `layer` (draw order among groups on
+one frame, `PlaceOrigin`), `displays`.
 
 ## Adding a setting
 

@@ -342,6 +342,7 @@ local GROUP_ONLY = {
   lines = function() return OneOf(Set("UP", "DOWN", "LEFT", "RIGHT")) end,
   lineSpacing = function() return Number(0, 40) end,
   lineMax = function() return Number(1, 40) end,
+  layer = function() return Number(1, 10) end,
   displays = function()
     return function(value, path)
       if not IsList(value) then

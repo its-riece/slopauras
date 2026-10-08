@@ -45,6 +45,7 @@ local DEFAULTS = {
   borderStyle = "blizzard", -- or "plain"; without a skin only
   borderWidth = 2, -- plain borders only
   lineSpacing = 2,
+  layer = 0,
   nameplateUnits = "enemy",
   hideWhenDead = true,
   hideWhenOffline = true,
@@ -267,13 +268,20 @@ local function AnchorFrame(leader, host)
   return UIParent, true
 end
 
--- Positions a row's origin from its group's anchor. Returns false while the
--- frame it names doesn't exist yet.
+-- Positions a row's origin from its group's anchor and sets its frame level.
+-- Returns false while the frame it names doesn't exist yet.
+--
+-- The level: 10 above the parent clears a unit frame's health bar and
+-- borders. Rows on one frame share its strata, and equal levels draw in no
+-- set order, so each layer adds 10, enough for a row's own levels (container,
+-- button, cooldown, overlay). Children keep their offset when the origin's
+-- level changes later.
 local function PlaceOrigin(row, host)
   local anchor = row.group.anchor or {}
   local point = anchor[1] or "CENTER"
   local relativeTo, found = AnchorFrame(row.group, host)
 
+  row.origin:SetFrameLevel(row.origin:GetParent():GetFrameLevel() + 10 + row.group.layer * 10)
   row.origin:ClearAllPoints()
   row.origin:SetPoint(point, relativeTo, anchor[3] or point, anchor[4] or 0, anchor[5] or 0)
   return found
@@ -387,14 +395,10 @@ local function BuildRow(config, host)
 
   -- Everything in the row hangs off this 1px frame. On a unit frame it's a
   -- child of that frame, so it's raised with it (clicking raises a party
-  -- frame) and hidden with it. The extra levels put it above the frame's own
-  -- health bar and borders. Set before creating our children, which start one
-  -- level above their parent.
+  -- frame) and hidden with it. PlaceOrigin sets its level, before our
+  -- children are created: they start one level above their parent.
   row.origin = CreateFrame("Frame", nil, host.frame or UIParent)
   row.origin:SetSize(1, 1)
-  if host.frame then
-    row.origin:SetFrameLevel(host.frame:GetFrameLevel() + 10)
-  end
   if not PlaceOrigin(row, host) then
     table.insert(unresolved, { row = row, host = host })
   end
@@ -987,7 +991,6 @@ local function OnPlateAdded(unit)
     host.frame = frame
     for _, row in ipairs(host.rows) do
       row.origin:SetParent(frame)
-      row.origin:SetFrameLevel(frame:GetFrameLevel() + 10)
       PlaceOrigin(row, host)
     end
   end

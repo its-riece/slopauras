@@ -1683,6 +1683,16 @@ local function PlacementTab(group)
       break3 = Break(7.9),
       x = AnchorRange(4, 8, "X"),
       y = AnchorRange(5, 9, "Y"),
+      break4 = Break(9.9),
+      layer = {
+        type = "range", order = 10, name = "Layer", min = 0, max = 10, step = 1,
+        desc = "When groups overlap on one frame, the higher layer draws on top.",
+        get = function() return group.layer end,
+        set = function(_, value)
+          group.layer = value > 0 and value or nil
+          Changed(false)
+        end,
+      },
     },
   }
 
