@@ -65,4 +65,5 @@ SlopAuras:1:group:{"name":"purgeable buffs","target":["nameplate"],"anchorTo":"u
 
 - Spell rank data from [talentsforever.com](https://talentsforever.com), used under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 - Settings UI built on [Ace3](https://github.com/WoWUIDev/Ace3).
+- Fonts from [LibSharedMedia-3.0](https://www.curseforge.com/wow/addons/libsharedmedia-3-0), used under the LGPL v2.1.
 - Bipp Glizzitor (Beta Tester)

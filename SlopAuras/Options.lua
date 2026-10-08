@@ -18,6 +18,51 @@ local POINTS = {
   LEFT = "Left", CENTER = "Center", RIGHT = "Right",
   BOTTOMLEFT = "Bottom left", BOTTOM = "Bottom", BOTTOMRIGHT = "Bottom right",
 }
+-- Reading order, as on the icon.
+local POINT_ORDER = { "TOPLEFT", "TOP", "TOPRIGHT", "LEFT", "CENTER", "RIGHT", "BOTTOMLEFT", "BOTTOM", "BOTTOMRIGHT" }
+local OUTLINES = { NONE = "None", OUTLINE = "Outline", THICKOUTLINE = "Thick outline" }
+local ALIGNS = { LEFT = "Left", CENTER = "Center", RIGHT = "Right" }
+local LSM = LibStub("LibSharedMedia-3.0")
+
+-- Fonts registered with LibSharedMedia (SharedMedia and other addons add
+-- theirs), after "[default game font]": the text's own, which differs between
+-- the timer (the countdown's font) and stacks (NumberFontNormal).
+local function FontValues()
+  local values = { default = "[default game font]" }
+  for _, name in ipairs(LSM:List("font")) do
+    values[name] = name
+  end
+  return values
+end
+
+local function FontSorting()
+  local list = { "default" }
+  for _, name in ipairs(LSM:List("font")) do
+    table.insert(list, name)
+  end
+  return list
+end
+
+-- A dropdown item that draws its font's name in that font (AceConfig's
+-- `itemControl`). AceGUI pools widgets by type and never resets an item's
+-- font, so this is its own type: a stock item with a changed font would turn
+-- up in other addons' dropdowns. Fonts load when the list first opens.
+local FONT_ITEM = "SlopAuras-FontItem"
+do
+  local AceGUI = LibStub("AceGUI-3.0")
+  AceGUI:RegisterWidgetType(FONT_ITEM, function()
+    local item = AceGUI.WidgetRegistry["Dropdown-Item-Toggle"]()
+    item.type = FONT_ITEM
+    local SetText = item.SetText
+    -- The item's text is the font's name (FontValues), or "[default game font]".
+    function item.SetText(self, text)
+      SetText(self, text)
+      local face, size, flags = GameFontNormalSmall:GetFont()
+      self.text:SetFont(text and LSM:Fetch("font", text, true) or face, size, flags)
+    end
+    return item
+  end, 1)
+end
 local GROWTHS = {
   RIGHT = "Right", LEFT = "Left", DOWN = "Down", UP = "Up",
   CENTER = "Centered (horizontal)", CENTER_VERTICAL = "Centered (vertical)",
@@ -543,6 +588,68 @@ local function SharedTabs(t, isDisplay, extra)
     }
   end
 
+  -- One box of settings for a text on the icon (StyleString in Chain.lua):
+  -- `prefix` "timer" or "stack", `hideKey` hides the text and greys the rest.
+  -- Missing icons have neither text.
+  local function TextBox(title, prefix, hideKey, hideLabel)
+    local function Key(name)
+      return prefix .. name
+    end
+    -- A control's own `disabled` replaces the panel's combat lock.
+    local function Disabled()
+      return ns.Locked() or t[hideKey] == true
+    end
+    local function Select(name, order, label, values, sorting, desc)
+      local key = Key(name)
+      return Resettable({
+        type = "select", order = order, name = Label(key, label), desc = Desc(key, desc),
+        values = values, sorting = sorting, disabled = Disabled,
+        get = function() return t[key] end,
+        set = function(_, value) Set(key, value) end,
+      }, key)
+    end
+    local function Slider(name, order, label, min, max)
+      local option = Range(Key(name), order, label, min, max, 1)
+      option.disabled = Disabled
+      return option
+    end
+
+    local font = Select("Font", 2, "Font", FontValues, FontSorting,
+      "Fonts from SharedMedia and other addons that register them. [default game font]: the font the game "
+      .. "uses for this text, which differs between the timer and stacks.")
+    font.itemControl = FONT_ITEM
+    font.get = function() return t[Key("Font")] or "default" end
+    -- A display saves false for the game font, so it can override a group's.
+    font.set = function(_, value) Set(Key("Font"), value ~= "default" and value or Off()) end
+
+    return {
+      type = "group", inline = true, name = title,
+      hidden = function() return isDisplay and t.mode == "missing" end,
+      args = {
+        hide = Toggle(hideKey, 1, hideLabel),
+        break1 = Break(1.5),
+        font = font,
+        size = Slider("Size", 3, "Size", 6, 32),
+        outline = Select("Outline", 4, "Outline", OUTLINES, { "NONE", "OUTLINE", "THICKOUTLINE" }),
+        break2 = Break(4.5),
+        point = Select("Point", 5, "Position", POINTS, POINT_ORDER, "Where on the icon the text sits."),
+        align = Select("Align", 6, "Alignment", ALIGNS, { "LEFT", "CENTER", "RIGHT" },
+          "Which side of the text sits on Position. At a right-hand corner, Right keeps the text inside the icon "
+          .. "and Left starts it there, running outward."),
+        break3 = Break(6.5),
+        x = Slider("X", 7, "X", -50, 50),
+        y = Slider("Y", 8, "Y", -50, 50),
+        break4 = Break(8.5),
+        color = Resettable({
+          type = "color", order = 9, name = Label(Key("Color"), "Color", true), desc = Desc(Key("Color")),
+          disabled = Disabled,
+          get = function() return unpack(t[Key("Color")]) end,
+          set = function(_, r, g, b) Set(Key("Color"), { r, g, b }) end,
+        }, Key("Color")),
+      },
+    }
+  end
+
   local look = {
     type = "group", name = "Appearance",
     args = {
@@ -551,7 +658,6 @@ local function SharedTabs(t, isDisplay, extra)
       alpha = Range("alpha", 3, "Alpha", 0, 1, 0.05, true),
       break1 = Break(3.9),
       zoom = Range("zoom", 4, "Zoom", 0, 1, 0.01, true),
-      timerSize = Range("timerSize", 4.1, "Timer text size", 6, 32, 1),
       max = Range("max", 4.3, "Show at most", 1, 40, 1),
       break1b = Break(4.9),
       sort = {
@@ -644,14 +750,15 @@ local function SharedTabs(t, isDisplay, extra)
       glowWhen = GlowWhenBox(),
       break3 = Break(8.9),
       desaturate = Toggle("desaturate", 9, "Desaturate"),
-      hideTimer = Toggle("hideTimer", 10, "Hide timer"),
+      hideSwipe = Toggle("hideSwipe", 10, "Hide swipe"),
       break4 = Break(10.9),
+      timerText = TextBox("Timer", "timer", "hideTimer", "Hide timer"),
+      stackText = TextBox("Stacks", "stack", "hideStacks", "Hide stacks"),
     },
   }
   look.args.zoom.desc = Desc("zoom", "Crops the icon's edges. At 0% you see the whole texture, including the border drawn into it.")
-  look.args.timerSize.hidden = function() return isDisplay and t.mode == "missing" end
-  -- Its own `disabled` replaces the panel's combat lock, so it repeats it.
-  look.args.timerSize.disabled = function() return ns.Locked() or t.hideTimer == true end
+  look.args.hideSwipe.desc = Desc("hideSwipe", "Hides the dark sweep that shows time left. The timer text still counts down.")
+  look.args.hideSwipe.hidden = ListOnly
   look.args.max.hidden = ListOnly
   look.args.sort.hidden = ListOnly
   look.args.sortReverse.hidden = ListOnly
@@ -853,9 +960,9 @@ local function SharedTabs(t, isDisplay, extra)
       { "newLine" }, { "max", "wrap", "spacing" }, { "sort", "sortReverse" },
     }),
     icon = Section(2, "Icon", {
-      { "size", "zoom", "alpha" }, { "tintMode" }, { "tint" }, { "desaturate" },
+      { "size", "zoom", "alpha" }, { "tintMode" }, { "tint" }, { "desaturate", "hideSwipe" },
     }),
-    timer = Section(3, "Timer", { { "timerSize" }, { "hideTimer" } }),
+    text = Section(3, "Text", { { "timerText" }, { "stackText" } }),
     border = Section(4, "Border", {
       { "skin", "borderSource", "borderStyle" }, { "borderWidth" }, { "borderColor" },
     }),

@@ -1,7 +1,9 @@
-SlopAuras is licensed under the WTFPL, below, except for two parts that keep
+SlopAuras is licensed under the WTFPL, below, except for three parts that keep
 their own licences:
 
 - SlopAuras/Libs/: Ace3, see SlopAuras/Libs/Ace3-LICENSE.txt.
+- SlopAuras/Libs/LibSharedMedia-3.0/: LibSharedMedia-3.0 under the LGPL v2.1,
+  see SlopAuras/Libs/LibSharedMedia-3.0/LICENSE.txt.
 - The spell rank data in SlopAuras/Ranks.lua: from talentsforever.com under
   CC BY 4.0, credited in the file header.
 

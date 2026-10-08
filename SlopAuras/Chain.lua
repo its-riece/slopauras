@@ -270,7 +270,8 @@ local function SkinCrop(skin)
   return type(coords) == "table" and #coords == 4 and coords or nil
 end
 
--- Bumped when a Masque skin changes, so Configure restyles every button.
+-- Bumped when a Masque skin changes or a font registers, so Configure restyles
+-- every button.
 local skinEpoch = 0
 
 function Chain.Reskinned()
@@ -648,9 +649,11 @@ end
 -- Every display key StyleButton reads, as one string: Configure restyles a
 -- button only when it changed. A new key StyleButton reads goes here too.
 local STYLE_KEYS = {
-  "size", "alpha", "zoom", "desaturate", "tint", "hideTimer", "timerSize", "mode",
+  "size", "alpha", "zoom", "desaturate", "tint", "hideSwipe", "mode",
   "dispelBorder", "borderColor", "skin", "borderStyle", "borderWidth", "glow", "glowCombat",
-  "glowInRange",
+  "glowInRange", "hideTimer", "hideStacks",
+  "timerSize", "timerFont", "timerOutline", "timerColor", "timerPoint", "timerAlign", "timerX", "timerY",
+  "stackSize", "stackFont", "stackOutline", "stackColor", "stackPoint", "stackAlign", "stackX", "stackY",
 }
 
 local function StyleText(d)
@@ -661,6 +664,40 @@ local function StyleText(d)
   end
   values[#values + 1] = skinEpoch
   return table.concat(values, "|")
+end
+
+-- A list button's two texts: the cooldown's countdown ("timer" keys) and the
+-- stack count ("stack" keys). Per prefix: Size; Font, a LibSharedMedia name
+-- (false or nil: the text's own font); Outline, "NONE", "OUTLINE" or
+-- "THICKOUTLINE"; Color; Point, where on the icon; Align, which side of the
+-- text sits on that point; X and Y.
+local LSM = LibStub("LibSharedMedia-3.0")
+
+-- The text's own anchor point: the icon point's top or bottom plus the
+-- alignment's side. At TOPRIGHT, "RIGHT" keeps the text inside the corner and
+-- "LEFT" starts it there. A one-line text sizes to fit, so justifying alone
+-- would move nothing.
+local function TextPoint(point, align)
+  local vertical = point:match("TOP") or point:match("BOTTOM") or ""
+  local textPoint = vertical .. (align ~= "CENTER" and align or "")
+  return textPoint ~= "" and textPoint or "CENTER"
+end
+
+-- `face`: the font the text was created with. The count's Text and Shown are
+-- Blizzard's (SetApplicationCount), its font, points and color ours.
+local function StyleString(text, anchor, d, prefix, face)
+  local name = d[prefix .. "Font"]
+  local font = name and LSM:Fetch("font", name, true) or face
+  local outline = d[prefix .. "Outline"]
+  local point, align = d[prefix .. "Point"], d[prefix .. "Align"]
+  local ok = pcall(text.SetFont, text, font, d[prefix .. "Size"], outline == "NONE" and "" or outline)
+  ok = pcall(function()
+    text:ClearAllPoints()
+    text:SetPoint(TextPoint(point, align), anchor, point, d[prefix .. "X"], d[prefix .. "Y"])
+    text:SetJustifyH(align)
+    text:SetTextColor(unpack(d[prefix .. "Color"]))
+  end) and ok
+  return ok
 end
 
 -- Applies the display's look to one button's parts. Out of combat only.
@@ -684,24 +721,23 @@ local function StyleButton(part, d)
     part.icon:SetAllPoints()
     part.cooldown:ClearAllPoints()
     part.cooldown:SetAllPoints()
-    part.count:ClearAllPoints()
-    part.count:SetPoint("BOTTOMRIGHT", -1, 1)
   end
   StyleIcon(part.icon, d, skin and SkinCrop(skin))
   -- CooldownFrameTemplate draws the remaining time as text over the swipe.
+  -- SetDurationCooldown locks only the cooldown's Cooldown and Shown
+  -- (Blizzard_CustomAuraButton.lua), so the swipe and text are ours. Both
+  -- texts are styled after Masque, which places the count from the skin.
   ok = pcall(part.cooldown.SetHideCountdownNumbers, part.cooldown, d.hideTimer == true) and ok
-  -- The engine's default countdown font is sized for action buttons and
-  -- covers small icons. Keep its face and outline, use the display's size.
-  local text = part.cooldown:GetCountdownFontString()
-  if text then
-    if not part.timerFont then
-      part.timerFont = { text:GetFont() }
-    end
-    local face, _, flags = unpack(part.timerFont)
-    if face then
-      ok = pcall(text.SetFont, text, face, d.timerSize, flags) and ok
-    end
+  ok = pcall(part.cooldown.SetDrawSwipe, part.cooldown, not d.hideSwipe) and ok
+  local timer = part.cooldown:GetCountdownFontString()
+  if timer then
+    part.timerFace = part.timerFace or timer:GetFont()
+    ok = StyleString(timer, part.button, d, "timer", part.timerFace) and ok
   end
+  part.stackFace = part.stackFace or part.count:GetFont()
+  ok = StyleString(part.count, part.button, d, "stack", part.stackFace) and ok
+  -- Shown is Blizzard's, so hiding goes through alpha.
+  ok = pcall(part.count.SetAlpha, part.count, d.hideStacks and 0 or 1) and ok
   ok = StyleDispelBorders(part, d, skin ~= nil) and ok
   StyleCustomBorder(part.customBorder, d, skin and part.ring)
 

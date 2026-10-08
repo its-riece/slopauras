@@ -22,7 +22,22 @@ local DEFAULTS = {
   spacing = 2,
   alpha = 1,
   zoom = 0,
+  -- Texts on the icon (StyleString in Chain.lua). No font: the text's own,
+  -- the countdown's for the timer, NumberFontNormal for stacks.
   timerSize = 12,
+  timerOutline = "OUTLINE",
+  timerColor = { 1, 1, 1 },
+  timerPoint = "CENTER",
+  timerAlign = "CENTER",
+  timerX = 0,
+  timerY = 0,
+  stackSize = 14,
+  stackOutline = "OUTLINE",
+  stackColor = { 1, 1, 1 },
+  stackPoint = "BOTTOMRIGHT",
+  stackAlign = "RIGHT",
+  stackX = -1,
+  stackY = 1,
   -- "masque": the group's Masque skin draws the frame and the border ring.
   -- Masque loads first (OptionalDeps), so with it installed, it drives icons
   -- unless a group or display says otherwise.
@@ -1095,6 +1110,15 @@ local function Build()
   built = true
   ns.InitOptions()
 end
+
+-- Media addons can register fonts after we've styled; a saved font name that
+-- wasn't there yet then takes effect.
+LibStub("LibSharedMedia-3.0").RegisterCallback(ns, "LibSharedMedia_Registered", function(_, mediaType)
+  if mediaType == "font" and built then
+    Chain.Reskinned()
+    ns.Changed(false)
+  end
+end)
 
 local events = CreateFrame("Frame")
 events:RegisterEvent("ADDON_LOADED")

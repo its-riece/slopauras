@@ -11,7 +11,7 @@ Load order is the `.toc` order.
 
 | File | What it does |
 |---|---|
-| `Libs/` | LibStub, CallbackHandler, AceGUI-3.0, AceConfig-3.0 (editor only). |
+| `Libs/` | LibStub, CallbackHandler, AceGUI-3.0, AceConfig-3.0 (editor only), LibSharedMedia-3.0 (fonts, LGPL v2.1). |
 | `Ranks.lua` | Spell rank families (class spells), generated from talentsforever.com data (CC BY 4.0, credited in the file). Regenerate rather than hand-edit. `ns.SpellRanks(id)`. |
 | `Chain.lua` | Builds a group's lines out of AuraContainers and links them; buttons, borders, glow, missing icons. No saved-data knowledge beyond a display's keys. |
 | `SlopAuras.lua` | Saved settings and inheritance (`DEFAULTS`, `ns.Prepare`), rows and hosts, show/hide conditions, applying editor changes, events. |
@@ -40,6 +40,11 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
 - **Animations inside buttons** go through `AddAuraShownAnimation`; Blizzard plays them
   when the button shows. A registered texture's alpha, vertex color and tex
   coords become secret aspects; its Shown state does not.
+- **Texts on a button:** the countdown (`GetCountdownFontString`) and the stack count are
+  styled after Masque, so their settings win over the skin (`StyleString`). The count's
+  Text and Shown are Blizzard's (`SetApplicationCount`), so hiding it sets its alpha to 0.
+  Fonts are fetched from LibSharedMedia by saved name, falling back to the text's own; a
+  font registered later restyles everything (`LibSharedMedia_Registered`).
 - **Child frames draw over parent textures.** The cooldown swipe is a child frame, so the
   count, borders and glow live on an overlay frame one level above it.
 - **Spell ID filters** (`includeSpellIDs` / `excludeSpellIDs`) only apply to buffs on
@@ -145,7 +150,8 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
   `FeedGroup` hook). Displays are keyed by position (`d1`, `d2`...).
 - Right-click on a control clears a display's own value (`HookWidgets`, `Resettable`).
 - Appearance is built flat in `SharedTabs`, then grouped into sections (Layout, Icon,
-  Timer, Border, Glow) by `Section` at its end: a new Appearance control needs a row
+  Text, Border, Glow) by `Section` at its end; Text holds one `TextBox` each for the timer
+  and stacks: a new Appearance control needs a row
   there too, or it won't show. Placement has Lines and Anchor sections.
 - AceConfigDialog lays controls out left to right and wraps; numeric widths are multiples
   of 170px; a tab group fills to the panel bottom (nothing can sit below it); a description
@@ -171,9 +177,12 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
 
 ## Saved keys
 
-Shared (group or display): `filter`, `size`, `spacing`, `alpha`, `zoom`, `timerSize`,
-`max`, `sort`, `sortReverse`, `desaturate`, `tint`, `dispelBorder`,
-`borderColor`, `skin`, `borderStyle`, `borderWidth`, `hideTimer`, `glow`, `glowCombat` (`"never"`
+Shared (group or display): `filter`, `size`, `spacing`, `alpha`, `zoom`,
+`max`, `sort`, `sortReverse`, `desaturate`, `hideSwipe`, `tint`, `dispelBorder`,
+`borderColor`, `skin`, `borderStyle`, `borderWidth`, `hideTimer`, `hideStacks`, and per text
+(`timer…` for the countdown, `stack…` for the count): `Size`, `Font` (a LibSharedMedia name,
+`false` for the text's own), `Outline` (`NONE`, `OUTLINE`, `THICKOUTLINE`), `Color`, `Point`,
+`Align` (`LEFT`, `CENTER`, `RIGHT`), `X`, `Y`; `glow`, `glowCombat` (`"never"`
 too), `glowInRange`, `combat`, `neverLoad`, `knownSpell` (an ID or list; negative = must not
 know; at least one positive must be known), `hideWhenPlayerDead`, `class`, `nameplateUnits`,
 `resting` and `mounted` (`true` only while, `false` only while not, `"any"`), `hideWhenDead`,

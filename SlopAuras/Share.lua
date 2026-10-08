@@ -143,6 +143,15 @@ end
 
 local COMBAT = Set("always", "in", "out")
 local POINTS = Set("TOPLEFT", "TOP", "TOPRIGHT", "LEFT", "CENTER", "RIGHT", "BOTTOMLEFT", "BOTTOM", "BOTTOMRIGHT")
+local OUTLINES = Set("NONE", "OUTLINE", "THICKOUTLINE")
+local ALIGNS = Set("LEFT", "CENTER", "RIGHT")
+
+local function FontName(value, path)
+  if value ~= false and (type(value) ~= "string" or value == "") then
+    Fail(path, "should be a font name or false")
+  end
+  return value
+end
 
 local function Classes()
   return Set(unpack(CLASS_SORT_ORDER))
@@ -182,6 +191,25 @@ local SHARED = {
     end
   end,
   hideTimer = function() return Boolean end,
+  hideStacks = function() return Boolean end,
+  hideSwipe = function() return Boolean end,
+  stackSize = function() return Number(6, 32) end,
+  -- A LibSharedMedia name, which the importer may not have (StyleString falls
+  -- back to the text's own font); false for the text's own font.
+  timerFont = function() return FontName end,
+  stackFont = function() return FontName end,
+  timerOutline = function() return OneOf(OUTLINES) end,
+  stackOutline = function() return OneOf(OUTLINES) end,
+  timerColor = function() return Color end,
+  stackColor = function() return Color end,
+  timerPoint = function() return OneOf(POINTS) end,
+  stackPoint = function() return OneOf(POINTS) end,
+  timerAlign = function() return OneOf(ALIGNS) end,
+  stackAlign = function() return OneOf(ALIGNS) end,
+  timerX = function() return Number(-50, 50) end,
+  timerY = function() return Number(-50, 50) end,
+  stackX = function() return Number(-50, 50) end,
+  stackY = function() return Number(-50, 50) end,
   tint = function()
     return function(value, path)
       if value == false then
