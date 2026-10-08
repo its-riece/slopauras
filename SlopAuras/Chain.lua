@@ -775,7 +775,7 @@ end
 -- etc.) and Blizzard fills them from the secret aura data. Size, tint and the
 -- rest are ours to change out of combat, so each button's parts are kept in
 -- `parts`. Buttons created later use the current values of slot `j`'s
--- display (a reorder rebinds slots, see Chain.SetDisplays) and the current
+-- display (a rebind moves displays between slots, see Chain.Resize) and the current
 -- range from `inst`.
 local function StyledButton(inst, j, parts)
   return function(button)
@@ -990,7 +990,11 @@ end
 -- for centered lines, whose shadow would measure the whole line). `plate`:
 -- the line is on a nameplate host. `skin`: the group's Masque group, or nil.
 function Chain.NewList(parent, unit, displays, g, lineSpacing, label, cap, plate, skin)
-  local inst = { displays = displays, parts = {}, on = {}, inRange = true, plate = plate, skin = skin }
+  -- slots: aura groups made, past #displays when Resize left spares.
+  -- masque[j]: whether slot j's buttons are registered with Masque.
+  local inst = {
+    displays = displays, parts = {}, on = {}, inRange = true, plate = plate, skin = skin, slots = #displays, masque = {},
+  }
   if cap and not g.shadow then
     inst.capWindow = CreateFrame("Frame", nil, parent, "DisableUntrustedLayoutScriptsTemplate")
     Name(inst.capWindow, label .. " (cap)")
@@ -1005,6 +1009,7 @@ function Chain.NewList(parent, unit, displays, g, lineSpacing, label, cap, plate
   Name(inst.main, label)
   for j, d in ipairs(displays) do
     inst.parts[j] = {}
+    inst.masque[j] = UsesMasque(inst, d)
     AddGroup(inst, inst.main, j, d, GroupOptions(d, g, lineSpacing, false, nil, StyledButton(inst, j, inst.parts[j])))
   end
   if g.shadow then
@@ -1018,6 +1023,47 @@ function Chain.NewList(parent, unit, displays, g, lineSpacing, label, cap, plate
     StyleCap(inst, g, cap)
   end
   return inst
+end
+
+-- Whether list line `inst` can take `displays` through Chain.Resize. A slot's
+-- Masque registration is fixed when its buttons are made, so each display
+-- landing on an existing slot must match it.
+function Chain.CanResize(inst, displays)
+  for j = 1, math.min(#displays, inst.slots) do
+    if inst.masque[j] ~= UsesMasque(inst, displays[j]) then
+      return false
+    end
+  end
+  return #displays > 0
+end
+
+-- Points a list line at a new list of displays, any length, without new
+-- containers: building a line makes 10 buttons per aura group up front
+-- (AddAuraGroup, Blizzard_CustomAuraContainer.lua), and a row on every
+-- nameplate makes that slow. Slots past the new count are turned off and kept
+-- as spares; extra displays take spares first, then new aura groups.
+-- Configure then pushes each slot's settings. Out of combat.
+function Chain.Resize(inst, displays, g, lineSpacing)
+  inst.displays = {}
+  for j, d in ipairs(displays) do
+    inst.displays[j] = d
+  end
+  for j = inst.slots + 1, #displays do
+    local d = displays[j]
+    inst.parts[j] = {}
+    inst.masque[j] = UsesMasque(inst, d)
+    AddGroup(inst, inst.main, j, d, GroupOptions(d, g, lineSpacing, false, nil, StyledButton(inst, j, inst.parts[j])))
+    if inst.shadow then
+      AddGroup(inst, inst.shadow, j, d, GroupOptions(d, g.shadow, lineSpacing, true))
+    end
+  end
+  inst.slots = math.max(inst.slots, #displays)
+  -- inst.on[j] is slot j's state, which UpdateLine compares against. A new
+  -- aura group starts on with no state, so UpdateLine sets it either way.
+  for j = #displays + 1, inst.slots do
+    Chain.SetDisplayActive(inst, j, false)
+    inst.on[j] = false
+  end
 end
 
 -- `wrap`: start a new row after that many icons, or nil for one row. The
@@ -1277,16 +1323,10 @@ function Chain.Release(inst)
   return count
 end
 
--- Points an instance at reordered display tables of the same shape (same
--- modes, same lines), so a reorder needs no new containers. Configure then
--- pushes each slot's new settings.
-function Chain.SetDisplays(inst, displays)
-  for j, d in ipairs(displays) do
-    inst.displays[j] = d
-  end
-  if inst.display then
-    inst.display = displays[1]
-  end
+-- Points a missing display at another display table of the same mode, so a
+-- reorder needs no new containers. Configure then pushes its settings.
+function Chain.SetDisplay(inst, d)
+  inst.displays[1], inst.display = d, d
 end
 
 -- Containers don't notice when a token like "target" or "party1" starts

@@ -217,14 +217,29 @@ local function ComputeRows()
       -- table (tostring gives its address).
       local lines = Chain.Lines(group.growth, group.lines)
       local parts = { tostring(group), group.growth, lines, group.lineMax and "capped" or "" }
+      -- The shape leaves out how many list displays each line has: a row of
+      -- the same shape is adapted in place (CanRebind, RebindRow) instead of
+      -- rebuilt.
+      local shape, lineHasList = { unpack(parts) }, false
       for j, display in ipairs(group.displays) do
         local newLine = j > 1 and display.newLine and "/" or ""
         -- Only Masque-style displays' buttons are registered with Masque.
         local masque = display.skin == "masque" and "+masque" or ""
         table.insert(parts, newLine .. display.mode .. masque)
+        if newLine ~= "" then
+          lineHasList = false
+          table.insert(shape, "/")
+        end
+        if display.mode == "missing" then
+          table.insert(shape, "missing" .. masque)
+        elseif not lineHasList then
+          lineHasList = true
+          table.insert(shape, "list")
+        end
       end
       table.insert(rows, {
         group = group, targets = targets, lines = lines, signature = table.concat(parts, "|"),
+        shape = table.concat(shape, "|"),
       })
     end
   end
@@ -391,7 +406,9 @@ end
 
 local function BuildRow(config, host)
   local group = config.group
-  local row = { group = group, g = Chain.Layout(group.growth, config.lines), signature = config.signature }
+  local row = {
+    group = group, g = Chain.Layout(group.growth, config.lines), signature = config.signature, shape = config.shape,
+  }
 
   -- Everything in the row hangs off this 1px frame. On a unit frame it's a
   -- child of that frame, so it's raised with it (clicking raises a party
@@ -574,33 +591,63 @@ end
 
 -- A kept row's displays may have been reordered: same modes and lines, other
 -- tables. Points its lines and containers at the current ones.
+local function ListDisplays(line)
+  local displays = {}
+  for k, entry in ipairs(line.listDisplays) do
+    displays[k] = entry.d
+  end
+  return displays
+end
+
+-- Whether a row of the same shape (ComputeRows) can take its group's
+-- displays as they are now. Lines with list displays keep them, though their
+-- number may change (Chain.Resize).
+local function CanRebind(row)
+  for i, fresh in ipairs(SplitLines(row.group)) do
+    local list = row.lines[i].list
+    if list and not Chain.CanResize(list, ListDisplays(fresh)) then
+      return false
+    end
+  end
+  return true
+end
+
+-- Points a row of the same shape at its group's displays: reordered, added
+-- or removed list displays reuse the line containers.
 local function RebindRow(row)
   for i, fresh in ipairs(SplitLines(row.group)) do
     local line = row.lines[i]
     line.listDisplays, line.missingDisplays = fresh.listDisplays, fresh.missingDisplays
     if line.list then
-      local displays = {}
-      for k, entry in ipairs(fresh.listDisplays) do
-        displays[k] = entry.d
-      end
-      Chain.SetDisplays(line.list, displays)
+      Chain.Resize(line.list, ListDisplays(fresh), row.g, row.group.lineSpacing)
     end
     for k, entry in ipairs(fresh.missingDisplays) do
-      Chain.SetDisplays(line.missing[k], { entry.d })
+      Chain.SetDisplay(line.missing[k], entry.d)
+    end
+  end
+end
+
+-- An old row with `config`'s shape that can take its displays, or nil. The
+-- shape includes the group's identity, so the row is already that group's.
+local function SameShape(old, config)
+  for _, row in pairs(old) do
+    if row.shape == config.shape and CanRebind(row) then
+      return row
     end
   end
 end
 
 -- Brings a host's rows in line with rowConfigs: keeps rows whose signature
--- is unchanged, builds new ones, retires the rest.
+-- is unchanged, adapts rows of the same shape, builds new ones, retires the
+-- rest.
 local function SyncHost(host)
   local old, rows, bySignature = host.rowsBySignature or {}, {}, {}
   for _, config in ipairs(rowConfigs) do
     if config.targets[host.kind] then
-      local row = old[config.signature]
+      local row = old[config.signature] or SameShape(old, config)
       if row then
-        old[config.signature] = nil
-        row.group = config.group
+        old[row.signature] = nil
+        row.group, row.signature = config.group, config.signature
         RebindRow(row)
       else
         row = BuildRow(config, host)

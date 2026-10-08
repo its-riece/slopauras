@@ -131,9 +131,12 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
 - The editor writes into the saved tables and calls `ns.Changed(structural)`; changes apply
   0.1s later, out of combat (`Apply`).
 - Each row has a **signature** (`ComputeRows`): group identity, growth, lines, cap, and each
-  display's mode and line break. SlopAuras rebuilds a row whose signature changed and
-  updates the rest in place (`Chain.Configure`). Reordering same-mode displays keeps the
-  row and rebinds it (`RebindRow`, `Chain.SetDisplays`).
+  display's mode and line break. SlopAuras updates rows in place (`Chain.Configure`) and
+  rebuilds only what it must. A row whose signature changed but whose **shape** didn't (the
+  signature minus how many list displays each line has) is rebound instead (`CanRebind`,
+  `RebindRow`): `Chain.Resize` gives a line more or fewer aura groups, turning extra ones
+  off and keeping them as spares. So reordering, adding, deleting and moving list displays
+  builds no new containers. Building is slow: each aura group makes 10 buttons up front.
 - WoW can't destroy frames. A rebuilt row's old containers get hidden and disabled, and
   stay in memory until `/reload`. Past `RELOAD_HINT` retired containers, the editor
   suggests a reload.

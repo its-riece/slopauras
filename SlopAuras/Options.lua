@@ -1303,6 +1303,9 @@ end
 -- Displays -------------------------------------------------------------------
 -- A display is a tree entry under its group, with its settings in tabs.
 
+-- The display whose "Move to group" dropdown is open, if any.
+local movingDisplay
+
 -- Checkboxes for display.dispelTypes, two per row. Chain.lua turns the list
 -- into the container's include or exclude map.
 local function DispelTypesBox(display)
@@ -1493,11 +1496,11 @@ local function DisplayOptions(group, display, index)
       actions = {
         type = "group", inline = true, order = 0, name = "",
         args = {
-          -- One row of four: the editor panel is often only ~2.7 units wide.
+          -- Two rows: reordering, then moving out or deleting.
           up = { type = "execute", order = 1, width = 0.62, name = "Move up", func = function() MoveDisplay(-1) end },
           down = { type = "execute", order = 2, width = 0.62, name = "Move down", func = function() MoveDisplay(1) end },
           duplicate = {
-            type = "execute", order = 4, width = 0.62, name = "Duplicate",
+            type = "execute", order = 3, width = 0.62, name = "Duplicate",
             desc = "Adds a copy below this one.",
             func = function()
               table.insert(list, index + 1, CopyTable(display))
@@ -1506,12 +1509,70 @@ local function DisplayOptions(group, display, index)
               AceConfigDialog:SelectGroup(addonName, "g" .. group.id, "d" .. (index + 1))
             end,
           },
+          breakReorder = Break(3.5),
           delete = {
             type = "execute", order = 5, width = 0.62, name = "Delete",
             confirm = function() return ("Delete %s?"):format(DisplayLabel(display)) end,
             func = function()
               table.remove(list, index)
               Changed(true)
+            end,
+          },
+          move = {
+            type = "execute", order = 4, width = 0.62, name = function() return movingDisplay == display and "Cancel" or "Move to" end,
+            hidden = function() return #ns.groups < 2 end,
+            func = function()
+              movingDisplay = movingDisplay ~= display and display or nil
+              Refresh()
+            end,
+          },
+          breakActions = Break(5.5),
+          -- Only the display's own values move; Prepare points its metatable
+          -- at the new group, so everything else follows that group.
+          moveTo = {
+            type = "select", order = 6, name = "Move to group",
+            desc = "Moves this display to the end of the chosen group. Settings it doesn't set itself then come from that group.",
+            hidden = function() return movingDisplay ~= display end,
+            confirm = function(_, key)
+              for _, other in ipairs(ns.groups) do
+                if "g" .. other.id == key then
+                  return ("Move %s to %s?"):format(DisplayLabel(display), other.name)
+                end
+              end
+            end,
+            values = function()
+              local values = {}
+              for _, other in ipairs(ns.groups) do
+                if other ~= group then
+                  values["g" .. other.id] = other.name
+                end
+              end
+              return values
+            end,
+            sorting = function()
+              local keys = {}
+              for _, other in ipairs(ns.groups) do
+                if other ~= group then
+                  table.insert(keys, "g" .. other.id)
+                end
+              end
+              return keys
+            end,
+            get = function() return nil end,
+            set = function(_, key)
+              local target
+              for _, other in ipairs(ns.groups) do
+                if "g" .. other.id == key then
+                  target = other
+                end
+              end
+              movingDisplay = nil
+              table.remove(list, index)
+              display.newLine = nil -- a new last display joins the last line
+              table.insert(target.displays, display)
+              ns.Prepare(target)
+              Changed(true)
+              AceConfigDialog:SelectGroup(addonName, key, "d" .. #target.displays)
             end,
           },
         },
