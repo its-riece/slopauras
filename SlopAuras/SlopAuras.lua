@@ -934,7 +934,12 @@ local raidHosts = {} -- raid unit frame -> its host
 --   grouped:   CompactRaidGroup1Member1 .. CompactRaidGroup8Member5
 --   flat list: CompactRaidFrame1, 2, ... These also show pets and main tank
 --              targets; frameType tells them apart.
+-- The CompactUnitFrame_SetUnit hook also sees forbidden nameplate frames
+-- (friendly plates in instances); IsForbidden is the one method they allow.
 local function IsRaidFrame(frame)
+  if frame:IsForbidden() then
+    return false
+  end
   local name = frame:GetName()
   if not name then
     return false
