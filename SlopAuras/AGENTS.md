@@ -79,8 +79,8 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
 
 ## How a group becomes frames
 
-- **Host:** one unit's place on screen (player, target, focus, each party or raid frame,
-  each nameplate). Every host gets its own copy of each row meant for it.
+- **Host:** one unit's place on screen (player, target, focus, each party or raid
+  frame, members and pets, each nameplate). Every host gets its own copy of each row meant for it.
 - **Row:** one group on one host. **Line:** one AuraContainer with one aura group per list
   display on it; its flow layout gives each display its own icon size and collapses empty
   ones. The container is 1px when empty.

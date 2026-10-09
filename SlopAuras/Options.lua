@@ -72,7 +72,8 @@ local GROWTH_ORDER = { "RIGHT", "LEFT", "DOWN", "UP", "CENTER", "CENTER_VERTICAL
 local TARGETS = {
   { "player", "You" }, { "target", "Your target" },
   { "focus", "Your focus" }, { "party", "Party members" },
-  { "raid", "Raid members" }, { "nameplate", "Nameplates" },
+  { "partypet", "Party pets" }, { "raid", "Raid members" },
+  { "raidpet", "Raid pets" }, { "nameplate", "Nameplates" },
 }
 local MODES = { list = "Matching auras", missing = "Icon when none match" }
 
@@ -1725,7 +1726,7 @@ local function PlacementTab(group)
         type = "select", order = 4, name = "Anchor to",
         values = { unit = "Each unit's own frame", screen = "Screen", frame = "A named frame" },
         desc = "Each unit's own frame: PlayerFrame, TargetFrame or FocusFrame for you, your target and your focus; "
-            .. "raid-style frames for party and raid members; nameplates for units with one.",
+            .. "raid-style frames for party and raid members and their pets; nameplates for units with one.",
         get = function() return group.anchorTo end,
         set = function(_, value)
           group.anchorTo = value

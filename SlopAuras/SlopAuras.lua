@@ -4,7 +4,7 @@
 -- showing (conditions), and applies the editor's changes.
 --
 -- A "host" is one unit's place on screen: the player, the target, the focus,
--- one party or raid frame, or one nameplate. Every host gets its own copy of
+-- one party or raid frame (members or pets), or one nameplate. Every host gets its own copy of
 -- the rows meant for it.
 
 local addonName, ns = ...
@@ -154,7 +154,10 @@ end
 -- containers are built from goes into its signature: when an edit changes the
 -- signature the row is rebuilt, otherwise it's updated in place.
 
-local TARGETS = { player = true, target = true, focus = true, party = true, raid = true, nameplate = true }
+local TARGETS = {
+  player = true, target = true, focus = true, party = true, partypet = true, raid = true, raidpet = true,
+  nameplate = true,
+}
 ns.TARGETS = TARGETS
 
 -- `target` is one name or a list of them. Returns a set, or false if a name is
@@ -461,8 +464,8 @@ local function ReleaseRow(row)
 end
 
 -- Hosts in the order a joined row runs through them: you, target, focus,
--- party, raid, nameplates; within a kind, in the order they were made.
-local KIND_ORDER = { player = 1, target = 2, focus = 3, party = 4, raid = 5, nameplate = 6 }
+-- party, party pets, raid, raid pets, nameplates; within a kind, in the order they were made.
+local KIND_ORDER = { player = 1, target = 2, focus = 3, party = 4, partypet = 5, raid = 6, raidpet = 7, nameplate = 8 }
 local orderedHosts = {}
 local hostCount = 0
 
@@ -707,7 +710,7 @@ local function NewHost(kind, unit, frame)
     kind = kind, unit = unit, frame = frame,
     rank = KIND_ORDER[kind] * 1000 + hostCount,
   }
-  if kind == "party" or kind == "raid" then
+  if kind == "party" or kind == "partypet" or kind == "raid" or kind == "raidpet" then
     host.rangeEvents = CreateFrame("Frame")
     host.rangeEvents:SetScript("OnEvent", function()
       UpdateRange(host)
@@ -922,38 +925,44 @@ local function WhenSafe(fn)
 end
 
 -- Party and raid -------------------------------------------------------------
--- One host per Blizzard compact party or raid frame. When Blizzard gives the
--- frame a new unit, the host's containers follow. In a raid Blizzard hides
+-- One host per Blizzard compact party or raid frame, members and pets. When
+-- Blizzard gives the frame a new unit, the host's containers follow. In a raid Blizzard hides
 -- the party frame (ShouldShowPartyFrames, GroupFrameVisibility.lua), so
 -- party-only displays hide there.
 
-local partyHosts = {} -- party unit frame -> its host
-local raidHosts = {} -- raid unit frame -> its host
+local partyHosts = {} -- party or party pet unit frame -> its host
+local raidHosts = {} -- raid or raid pet unit frame -> its host
 
 -- Raid frames are created on demand, in two layouts (Blizzard_CompactRaidFrames):
 --   grouped:   CompactRaidGroup1Member1 .. CompactRaidGroup8Member5
 --   flat list: CompactRaidFrame1, 2, ... These also show pets and main tank
---              targets; frameType tells them apart.
--- The CompactUnitFrame_SetUnit hook also sees forbidden nameplate frames
--- (friendly plates in instances); IsForbidden is the one method they allow.
-local function IsRaidFrame(frame)
+--              targets; frameType tells them apart. Pets are flat in both
+--              layouts (AddPets). Each frameType has its own frame pool
+--              (frameReservations), so a frame keeps its kind.
+local FLAT_KINDS = { raid = "raid", flagged = "raid", pet = "raidpet" }
+
+-- "raid", "raidpet", or nil for anything else. The CompactUnitFrame_SetUnit
+-- hook also sees forbidden nameplate frames (friendly plates in instances);
+-- IsForbidden is the one method they allow.
+local function RaidFrameKind(frame)
   if frame:IsForbidden() then
-    return false
+    return nil
   end
   local name = frame:GetName()
   if not name then
-    return false
+    return nil
   end
   if name:match("^CompactRaidGroup%d+Member%d+$") then
-    return true
+    return "raid"
   end
-  return name:match("^CompactRaidFrame%d+$") ~= nil
-      and (frame.frameType == "raid" or frame.frameType == "flagged")
+  if name:match("^CompactRaidFrame%d+$") then
+    return FLAT_KINDS[frame.frameType]
+  end
 end
 
-local function AddRaidHost(frame)
+local function AddRaidHost(frame, kind)
   if not raidHosts[frame] then
-    raidHosts[frame] = NewHost("raid", frame.unit, frame)
+    raidHosts[frame] = NewHost(kind, frame.unit, frame)
     UpdateHost(raidHosts[frame])
   end
 end
@@ -964,15 +973,16 @@ local function ScanRaidFrames()
     for member = 1, 5 do
       local frame = _G["CompactRaidGroup" .. group .. "Member" .. member]
       if frame and frame.unit then
-        AddRaidHost(frame)
+        AddRaidHost(frame, "raid")
       end
     end
   end
   local i = 1
   while _G["CompactRaidFrame" .. i] do
     local frame = _G["CompactRaidFrame" .. i]
-    if frame.unit and IsRaidFrame(frame) then
-      AddRaidHost(frame)
+    local kind = frame.unit and RaidFrameKind(frame)
+    if kind then
+      AddRaidHost(frame, kind)
     end
     i = i + 1
   end
@@ -984,12 +994,15 @@ hooksecurefunc("CompactUnitFrame_SetUnit", function(frame, unit)
   local host = partyHosts[frame] or raidHosts[frame]
   if host then
     SetHostUnit(host, unit)
-  elseif built and unit and IsRaidFrame(frame) then
-    -- A raid frame we haven't seen. Blizzard only creates them out of
-    -- combat, but give it its host once that's safe either way.
-    WhenSafe(function()
-      AddRaidHost(frame)
-    end)
+  elseif built and unit then
+    local kind = RaidFrameKind(frame)
+    if kind then
+      -- A raid frame we haven't seen. Blizzard only creates them out of
+      -- combat, but give it its host once that's safe either way.
+      WhenSafe(function()
+        AddRaidHost(frame, kind)
+      end)
+    end
   end
 end)
 
@@ -999,6 +1012,10 @@ local function BuildParty()
   end
   for _, frame in ipairs(CompactPartyFrame.memberUnitFrames) do
     partyHosts[frame] = NewHost("party", frame.unit, frame)
+  end
+  -- Pet1-5 under the members (CompactPartyFrame.xml); no unit while pets are hidden.
+  for _, frame in ipairs(CompactPartyFrame.petUnitFrames) do
+    partyHosts[frame] = NewHost("partypet", frame.unit, frame)
   end
   UpdateAll()
 end
@@ -1199,6 +1216,7 @@ events:RegisterEvent("PLAYER_REGEN_DISABLED")
 events:RegisterEvent("PLAYER_REGEN_ENABLED")
 events:RegisterEvent("PLAYER_TARGET_CHANGED")
 events:RegisterEvent("GROUP_ROSTER_UPDATE")
+events:RegisterEvent("UNIT_PET")
 events:RegisterEvent("NAME_PLATE_UNIT_ADDED")
 events:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
 if C_EventUtils.IsEventValid("PLAYER_FOCUS_CHANGED") then
@@ -1262,6 +1280,15 @@ events:SetScript("OnEvent", function(_, event, arg)
     if not rosterRefreshQueued then
       rosterRefreshQueued = true
       C_Timer.After(0.2, RefreshGroupHosts)
+    end
+  elseif event == "UNIT_PET" then
+    -- "partypet1" or "raidpet7" may now be a different pet.
+    for _, list in ipairs({ partyHosts, raidHosts }) do
+      for _, host in pairs(list) do
+        if host.kind == "partypet" or host.kind == "raidpet" then
+          RefreshHost(host)
+        end
+      end
     end
   end
 end)
