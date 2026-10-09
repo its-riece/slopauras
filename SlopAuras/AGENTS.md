@@ -65,7 +65,7 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
 ## Data model
 
 - **Group:** placement (`target`, `anchorTo`, `anchor`, `growth`, `lines`, `lineSpacing`,
-  `lineMax`) and an ordered `displays` list. Any display key on a group is a default.
+  `firstLine`) and an ordered `displays` list. Any display key on a group is a default.
 - **Display:** one aura group in a line (or a missing icon).
 - **Inheritance:** display → group → `DEFAULTS`, via metatables (`ns.Prepare`). SlopAuras
   saves only raw values. Read a display's own value with `rawget` when inheritance would
@@ -93,12 +93,16 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
 - **Centering** (`growth = "CENTER"`, or `"CENTER_VERTICAL"` for a column): Lua can't halve
   a secret width, so each container has a half-size shadow copy. The shadows chain backwards
   from the center (left, or up), and the visible line starts where they end.
-- **Show only the first** (`lineMax`, per line): the line's container sits in a clip window anchored to its
-  own start.
+- **Show only the first line** (`firstLine`, per group): the row's containers sit in one clip
+  window at the row's origin (`Chain.StyleFirstLine`), one line of the biggest icon deep.
+  Empty lines collapse, so it shows the first line that has auras. Only for rows on their
+  own (`ns.SingleRow`); lines don't wrap while it's on. A smaller line on top would let the
+  edge of the next one show, so only the last line may be smaller: otherwise
+  (`ns.FirstLineConflict`) the window clips nothing and the editor says why.
 - **Wrapping lines** (`wrap` on the display that starts a line): the container's flow layout
   wraps by length (`Chain.SetWrap`), so the next line follows its last row. Only for lines
-  without missing displays, in uncapped groups whose strands are a single row
-  (`ns.SingleRow`, `LineWrap`): other lines keep a fixed height.
+  without missing displays, in groups not showing only their first line, whose strands are
+  a single row (`ns.SingleRow`, `LineWrap`): other lines keep a fixed height.
 - **Anchoring:** `anchorTo = "unit"` rows hang off the host's frame (unit frames, compact
   party/raid frames, the nameplate itself, not Blizzard's UnitFrame inside it, which
   nameplate addons hide). Screen/frame rows of all hosts join one strand (`Strand`).
@@ -155,10 +159,11 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
   have both tree children and tabs, so selecting a group redirects to its Settings entry (a
   `FeedGroup` hook). Displays are keyed by position (`d1`, `d2`...).
 - Right-click on a control clears a display's own value (`HookWidgets`, `Resettable`).
-- Appearance is built flat in `SharedTabs`, then grouped into sections (Layout, Icon,
+- Appearance is built flat in `SharedTabs`, then grouped into sections (Arrangement, Icon,
   Text, Border, Glow) by `Section` at its end; Text holds one `TextBox` each for the timer
   and stacks: a new Appearance control needs a row
-  there too, or it won't show. Placement has Lines and Anchor sections.
+  there too, or it won't show. A group's Layout tab (`LayoutTab`) holds the Lines section
+  (`LineControls`: Grow, New lines go, Line spacing, Show only the first line) and Anchor.
 - AceConfigDialog lays controls out left to right and wraps; numeric widths are multiples
   of 170px; a tab group fills to the panel bottom (nothing can sit below it); a description
   has one font size.
@@ -203,10 +208,12 @@ the line this display starts), `spellIDs` and
 
 On load, `LoadSettings` drops displays with any other `mode` and the retired keys in
 `RETIRED_KEYS` (SlopAuras.lua). A key that stops being used goes there, so old saves still
-export strings that import accepts.
+export strings that import accepts. A group's `lineMax` (older saves and strings) is
+converted on load and import by `ns.ConvertLineMax`.
 
 Group only: `id`, `name`, `target`, `anchorTo`, `anchor` (`{ point, frameName, relativePoint,
-x, y }`), `growth`, `lines`, `lineSpacing`, `lineMax`, `layer` (draw order among groups on
+x, y }`), `growth`, `lines`, `lineSpacing`, `firstLine` (`true`: show only the first
+line that has auras), `layer` (draw order among groups on
 one frame, `PlaceOrigin`), `displays`.
 
 ## Adding a setting

@@ -342,7 +342,8 @@ local GROUP_ONLY = {
   growth = function() return OneOf(ns.Chain.GROWTHS) end,
   lines = function() return OneOf(Set("UP", "DOWN", "LEFT", "RIGHT")) end,
   lineSpacing = function() return Number(0, 40) end,
-  lineMax = function() return Number(1, 40) end,
+  lineMax = function() return Number(1, 40) end, -- converted, see ns.ConvertLineMax
+  firstLine = function() return Boolean end,
   layer = function() return Number(1, 10) end,
   displays = function()
     return function(value, path)
@@ -391,6 +392,7 @@ local function ValidateGroup(value, path)
     Fail(path, "needs a name")
   end
   group.displays = group.displays or {}
+  ns.ConvertLineMax(group)
   return group
 end
 

@@ -200,11 +200,11 @@ end
 -- Displays -------------------------------------------------------------------
 
 -- Whether display `index` starts a line that can wrap (LineWrap in
--- SlopAuras.lua): the line has no missing displays, the group isn't capped,
--- and its lines aren't shared by several units.
+-- SlopAuras.lua): the line has no missing displays, the group isn't showing
+-- only its first line, and its lines aren't shared by several units.
 local function CanWrap(group, index)
   local list = group.displays
-  if (index > 1 and not list[index].newLine) or group.lineMax or not ns.SingleRow(group) then
+  if (index > 1 and not list[index].newLine) or group.firstLine or not ns.SingleRow(group) then
     return false
   end
   for j = index, #list do
@@ -216,17 +216,6 @@ local function CanWrap(group, index)
     end
   end
   return true
-end
-
--- Whether any line of the group wraps. A saved wrap that doesn't apply (the
--- display no longer starts a line, say) doesn't count.
-local function AnyWraps(group)
-  for j, display in ipairs(group.displays) do
-    if rawget(display, "wrap") and CanWrap(group, j) then
-      return true
-    end
-  end
-  return false
 end
 
 -- A display's own name, or one made from its spell, filter or mode. rawget:
@@ -252,6 +241,34 @@ end
 
 local function DisplayName(display, index)
   return index .. ". " .. DisplayLabel(display)
+end
+
+local ALERT = "|TInterface\\DialogFrame\\UI-Dialog-Icon-AlertNew:0|t"
+
+local FIRST_LINE_TITLE = "\"Show only the first line\" doesn't work with these icon sizes"
+
+-- Why "Show only the first line" is ignored (ns.FirstLineConflict), for the
+-- top of the group's Settings and of each of its displays, since sizes are
+-- usually changed on a display. With two lines, moving the smaller one last
+-- fixes it; with more, a line in between would be on top, so it joins the
+-- last line instead.
+local function FirstLineWarning(group, order)
+  return {
+    type = "description", order = order, width = "full", fontSize = "medium",
+    name = function()
+      local conflict = ns.FirstLineConflict(group)
+      if not conflict then
+        return ""
+      end
+      local small, big = DisplayLabel(conflict.small.display), DisplayLabel(conflict.big.display)
+      local move = conflict.lines == 2 and "move it to the last line"
+          or ("put it on the same line as \"%s\""):format(DisplayLabel(conflict.last))
+      local body = ("\"%s\" (%dpx) is smaller than \"%s\" (%dpx). Make \"%s\" %dpx, or %s. All lines show until then.")
+          :format(small, conflict.small.size, big, conflict.big.size, small, conflict.big.size, move)
+      return ALERT .. " |cffff9933" .. FIRST_LINE_TITLE .. "|r\n" .. body
+    end,
+    hidden = function() return ns.FirstLineConflict(group) == nil end,
+  }
 end
 
 -- Appearance, Load conditions ------------------------------------------------
@@ -659,7 +676,7 @@ local function SharedTabs(t, isDisplay, extra)
       alpha = Range("alpha", 3, "Alpha", 0, 1, 0.05, true),
       break1 = Break(3.9),
       zoom = Range("zoom", 4, "Zoom", 0, 1, 0.01, true),
-      max = Range("max", 4.3, "Show at most", 1, 40, 1),
+      max = Range("max", 4.3, "Max icons shown", 1, 40, 1),
       break1b = Break(4.9),
       sort = {
         type = "select", order = 6, name = Label("sort", "Sort"), desc = Desc("sort"), values = SortValues(),
@@ -968,7 +985,7 @@ local function SharedTabs(t, isDisplay, extra)
     }
   end
   look.args = {
-    layout = Section(1, "Layout", {
+    layout = Section(1, "Arrangement", {
       { "newLine" }, { "max", "wrap", "spacing" }, { "sort", "sortReverse" },
     }),
     icon = Section(2, "Icon", {
@@ -1479,7 +1496,7 @@ local function DisplayOptions(group, display, index)
   local look, load = SharedTabs(display, true, {
     newLine = {
       type = "toggle", width = 1.5, name = "Start a new line", hidden = index == 1,
-      desc = "Puts this display and the ones after it on a new line. The group's Placement tab sets where new lines go.",
+      desc = "Puts this display and the ones after it on a new line. The group's Layout tab sets where new lines go.",
       get = function() return rawget(display, "newLine") == true end,
       set = function(_, value)
         display.newLine = value or nil
@@ -1540,6 +1557,7 @@ local function DisplayOptions(group, display, index)
             end,
           },
           breakActions = Break(5.5),
+          firstLineWarning = FirstLineWarning(group, 5.6),
           -- Only the display's own values move; Prepare points its metatable
           -- at the new group, so everything else follows that group.
           moveTo = {
@@ -1666,9 +1684,55 @@ local function AddDisplay(group)
   Changed(true)
 end
 
-local function PlacementTab(group)
+-- The Lines section of a group's Layout tab.
+local function LineControls(group)
   local growthGet, growthSet = Field(group, "growth", true)
+  local args = {
+    growth = {
+      type = "select", order = 1, name = "Grow", values = GROWTHS, sorting = GROWTH_ORDER,
+      get = growthGet, set = growthSet,
+    },
+    lines = {
+      type = "select", order = 2, name = "New lines go",
+      desc = "Where a display set to start a new line goes: across from the way icons grow.",
+      values = function()
+        if ns.Chain.Vertical(group.growth) then
+          return { LEFT = "Left", RIGHT = "Right" }
+        end
+        return { UP = "Up", DOWN = "Down" }
+      end,
+      get = function() return ns.Chain.Lines(group.growth, group.lines) end,
+      set = function(_, value)
+        group.lines = value
+        Changed(true)
+      end,
+    },
+    lineSpacing = {
+      type = "range", order = 3, name = "Line spacing", min = 0, max = 40, step = 1,
+      desc = "Gap between lines.",
+      get = function() return group.lineSpacing end,
+      set = function(_, value)
+        group.lineSpacing = value
+        Changed(false)
+      end,
+    },
+    break1 = Break(3.5),
+    firstLine = {
+      type = "toggle", order = 4, width = 1.5, name = "Show only the first line",
+      desc = "Shows only the first line with icons, hides the rest.",
+      -- Lines shared by several units keep their height, so nothing moves up.
+      hidden = function() return not ns.SingleRow(group) end,
+      get = function() return group.firstLine == true end,
+      set = function(_, value)
+        group.firstLine = value or nil
+        Changed(true)
+      end,
+    },
+  }
+  return { type = "group", inline = true, order = 1, name = "Lines", args = args }
+end
 
+local function LayoutTab(group)
   local function AnchorRange(slot, order, label)
     local get, set = AnchorField(group, slot, 0)
     return {
@@ -1683,53 +1747,6 @@ local function PlacementTab(group)
   end
 
   local frameGet, frameSet = AnchorField(group, 2, "")
-
-  local lines = {
-    type = "group", inline = true, order = 1, name = "Lines",
-    args = {
-      growth = {
-        type = "select", order = 1, name = "Grow", values = GROWTHS, sorting = GROWTH_ORDER,
-        get = growthGet, set = growthSet,
-      },
-      lines = {
-        type = "select", order = 2, name = "New lines go",
-        desc = "Where a display set to start a new line goes: across from the way icons grow.",
-        values = function()
-          if ns.Chain.Vertical(group.growth) then
-            return { LEFT = "Left", RIGHT = "Right" }
-          end
-          return { UP = "Up", DOWN = "Down" }
-        end,
-        get = function() return ns.Chain.Lines(group.growth, group.lines) end,
-        set = function(_, value)
-          group.lines = value
-          Changed(true)
-        end,
-      },
-      lineSpacing = {
-        type = "range", order = 3, name = "Line spacing", min = 0, max = 40, step = 1,
-        desc = "Gap between lines.",
-        get = function() return group.lineSpacing end,
-        set = function(_, value)
-          group.lineSpacing = value
-          Changed(false)
-        end,
-      },
-      break1 = Break(3.4),
-      lineMax = {
-        type = "range", order = 3.5, name = "Show only the first", min = 0, max = 40, step = 1,
-        desc = "Shows only this many icons per line: the first displays that have auras, in display order. "
-            .. "0: no limit. Works best when every icon on the line is the same size. Not for centered growth.",
-        -- A line can't both wrap and cap.
-        hidden = function() return group.growth == "CENTER" or group.growth == "CENTER_VERTICAL" or AnyWraps(group) end,
-        get = function() return group.lineMax or 0 end,
-        set = function(_, value)
-          group.lineMax = value > 0 and value or nil
-          Changed(true)
-        end,
-      },
-    },
-  }
 
   local anchor = {
     type = "group", inline = true, order = 2, name = "Anchor",
@@ -1770,7 +1787,7 @@ local function PlacementTab(group)
     },
   }
 
-  return { type = "group", order = 2, name = "Placement", args = { lines = lines, anchor = anchor } }
+  return { type = "group", order = 2, name = "Layout", args = { lines = LineControls(group), anchor = anchor } }
 end
 
 -- One checkbox per unit kind, two per row, in TARGETS order. A multiselect
@@ -1857,11 +1874,12 @@ local function GroupOptions(group, index)
       rowBreak = Break(3.5),
       up = { type = "execute", order = 4, width = 0.8, name = "Move up", func = function() Move(ns.groups, index, -1) end },
       down = { type = "execute", order = 5, width = 0.8, name = "Move down", func = function() Move(ns.groups, index, 1) end },
+      firstLineWarning = FirstLineWarning(group, 6),
     },
   }
 
   local tabs = {
-    general = general, placement = PlacementTab(group), look = look, load = load,
+    general = general, placement = LayoutTab(group), look = look, load = load,
     share = GroupShareTab(group),
   }
   tabs.actions = actions
@@ -1878,7 +1896,16 @@ local function GroupOptions(group, index)
     args["d" .. i] = DisplayOptions(group, display, i)
   end
 
-  return { type = "group", order = 10 + index, name = function() return group.name or ("Group " .. group.id) end, args = args }
+  -- An alert icon in the tree while FirstLineWarning shows, so it's seen from
+  -- other pages too; hovering the entry shows its desc.
+  local function TreeName()
+    local name = group.name or ("Group " .. group.id)
+    return ns.FirstLineConflict(group) and ALERT .. " " .. name or name
+  end
+  local function TreeDesc()
+    return ns.FirstLineConflict(group) and FIRST_LINE_TITLE .. "." or nil
+  end
+  return { type = "group", order = 10 + index, name = TreeName, desc = TreeDesc, args = args }
 end
 
 -- Root -----------------------------------------------------------------------

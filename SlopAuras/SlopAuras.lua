@@ -107,8 +107,32 @@ function ns.MoveGroupFilter(group)
   end
 end
 
+-- `lineMax` (older saves and import strings) showed only the first N icons of
+-- each line. With one line and N = 1 it picked one icon by display order: the
+-- same as each display on its own line, showing one icon, and only the first
+-- line showing. Other uses have no equivalent and show every icon. Also takes
+-- import tables, after validation.
+function ns.ConvertLineMax(group)
+  local cap = group.lineMax
+  group.lineMax = nil
+  if cap ~= 1 or group.growth == "CENTER" or group.growth == "CENTER_VERTICAL" then
+    return -- centered lines ignored it
+  end
+  for j, display in ipairs(group.displays) do
+    if j > 1 and display.newLine then
+      return
+    end
+  end
+  group.firstLine = true
+  for j, display in ipairs(group.displays) do
+    display.newLine = j > 1 or nil
+    display.max = 1
+  end
+end
+
 local function Clean(group)
   ns.MoveGroupFilter(group)
+  ns.ConvertLineMax(group)
   for _, key in ipairs(RETIRED_KEYS) do
     group[key] = nil
   end
@@ -220,7 +244,9 @@ local function ComputeRows()
       -- keeps the row and rebinds it (RebindRow). The group's identity is its
       -- table (tostring gives its address).
       local lines = Chain.Lines(group.growth, group.lines)
-      local parts = { tostring(group), group.growth, lines, group.lineMax and "capped" or "" }
+      local parts = {
+        tostring(group), group.growth, lines, group.firstLine and "first line" or "",
+      }
       -- The shape leaves out how many list displays each line has: a row of
       -- the same shape is adapted in place (CanRebind, RebindRow) instead of
       -- rebuilt.
@@ -355,12 +381,60 @@ end
 -- How many icons a line's rows hold, or nil for one row: the wrap of the
 -- display that starts it. A line with missing displays keeps one row (missing
 -- icons chain after the first row, and the line's height is fixed), and so
--- does a capped group.
+-- does a group showing only its first line.
 local function LineWrap(group, line)
-  if #line.missingDisplays > 0 or group.lineMax or not ns.SingleRow(group) then
+  if #line.missingDisplays > 0 or group.firstLine or not ns.SingleRow(group) then
     return nil
   end
   return line.listDisplays[1].d.wrap
+end
+
+-- How far a line reaches across: its biggest icon plus the line spacing.
+local function LineHeight(line, group)
+  local size = 0
+  for _, entry in ipairs(line.listDisplays) do
+    size = math.max(size, entry.d.size)
+  end
+  for _, entry in ipairs(line.missingDisplays) do
+    size = math.max(size, entry.d.size)
+  end
+  return size + group.lineSpacing
+end
+
+-- Why "Show only the first line" can't work with the group's icon sizes, or
+-- nil. Its window (Chain.StyleFirstLine) is one line of the biggest icon deep,
+-- and Lua can't tell which line is on top. A line of smaller icons on top leaves
+-- room for the edge of any line after it, so only the last line may be
+-- smaller. Returns { small, big, last, lines }: the smaller line and the
+-- biggest as { display = its first display, size = its biggest icon }, the
+-- last line's first display, and how many lines there are. While it returns
+-- one the setting is ignored (StyleFirstLine) and the editor says why.
+function ns.FirstLineConflict(group)
+  if not group.firstLine or not ns.SingleRow(group) then
+    return nil
+  end
+  local lines, biggest = SplitLines(group), nil
+  for _, line in ipairs(lines) do
+    local first = line.listDisplays[1]
+    if line.missingDisplays[1] and (not first or line.missingDisplays[1].j < first.j) then
+      first = line.missingDisplays[1]
+    end
+    line.first, line.size = first.d, LineHeight(line, group) - group.lineSpacing
+    if not biggest or line.size > biggest.size then
+      biggest = line
+    end
+  end
+  for i = 1, #lines - 1 do
+    local line = lines[i]
+    if line.size < biggest.size then
+      return {
+        small = { display = line.first, size = line.size },
+        big = { display = biggest.first, size = biggest.size },
+        last = lines[#lines].first, lines = #lines,
+      }
+    end
+  end
+  return nil
 end
 
 -- Masque ---------------------------------------------------------------------
@@ -408,6 +482,18 @@ local function SyncSkins()
   end
 end
 
+-- Sizes a row's first line window (Chain.StyleFirstLine). Only a row on its
+-- own collapses empty lines (PlaceLine), so elsewhere the window shows every
+-- line, as it does while the icon sizes don't allow it (ns.FirstLineConflict).
+local function StyleFirstLine(row)
+  if row.firstLineWindow then
+    local group = row.group
+    local clip = ns.SingleRow(group) and not ns.FirstLineConflict(group)
+    Chain.StyleFirstLine(row.firstLineWindow, row.origin, row.g, group.displays, group.lineSpacing, clip,
+      skins[tostring(group.id)])
+  end
+end
+
 local function BuildRow(config, host)
   local group = config.group
   local row = {
@@ -426,6 +512,13 @@ local function BuildRow(config, host)
 
   local unit, name = host.unit or "player", group.name or "Group"
   local skin = skins[tostring(group.id)]
+  -- Containers go inside the first line window when there is one, so it clips
+  -- them.
+  local parent = row.origin
+  if group.firstLine then
+    row.firstLineWindow = Chain.NewFirstLineWindow(row.origin, name)
+    parent = row.firstLineWindow
+  end
   row.lines = SplitLines(group)
   for i, line in ipairs(row.lines) do
     -- Later lines start at their own 1px origin, anchored by Relink. It may be
@@ -441,17 +534,18 @@ local function BuildRow(config, host)
       for k, entry in ipairs(line.listDisplays) do
         displays[k] = entry.d
       end
-      line.list = Chain.NewList(row.origin, unit, displays, row.g, group.lineSpacing, ("%s line %d"):format(name, i),
-        group.lineMax, host.kind == "nameplate", skin)
+      line.list = Chain.NewList(parent, unit, displays, row.g, group.lineSpacing, ("%s line %d"):format(name, i),
+        host.kind == "nameplate", skin)
       Chain.SetWrap(line.list, LineWrap(group, line))
     end
     line.missing = {}
     for _, entry in ipairs(line.missingDisplays) do
       local label = ("%s %d"):format(name, entry.j)
       table.insert(line.missing,
-        Chain.NewMissing(row.origin, unit, entry.d, row.g, group.lineSpacing, label, host.kind == "nameplate", skin))
+        Chain.NewMissing(parent, unit, entry.d, row.g, group.lineSpacing, label, host.kind == "nameplate", skin))
     end
   end
+  StyleFirstLine(row)
 
   return row
 end
@@ -500,18 +594,6 @@ local function LineInsts(row, i)
     end
   end
   return insts
-end
-
--- How far a line reaches across: its biggest icon plus the line spacing.
-local function LineHeight(line, group)
-  local size = 0
-  for _, entry in ipairs(line.listDisplays) do
-    size = math.max(size, entry.d.size)
-  end
-  for _, entry in ipairs(line.missingDisplays) do
-    size = math.max(size, entry.d.size)
-  end
-  return size + group.lineSpacing
 end
 
 -- Places line `i`'s origin after line i - 1. A line with only aura icons
@@ -1117,8 +1199,9 @@ local function Apply(structural)
     for _, host in ipairs(hosts) do
       for _, row in ipairs(host.rows) do
         PlaceOrigin(row, host)
+        StyleFirstLine(row)
         for inst in EachInst(row) do
-          Chain.Configure(inst, row.g, row.group.lineSpacing, row.group.lineMax)
+          Chain.Configure(inst, row.g, row.group.lineSpacing)
         end
         for _, line in ipairs(row.lines) do
           if line.list then
