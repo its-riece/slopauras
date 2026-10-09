@@ -655,7 +655,7 @@ end
 local STYLE_KEYS = {
   "size", "alpha", "zoom", "desaturate", "tint", "hideSwipe", "mode",
   "dispelBorder", "borderColor", "skin", "borderStyle", "borderWidth", "glow", "glowCombat",
-  "glowInRange", "hideTimer", "hideStacks",
+  "glowInRange", "hideTimer", "hideStacks", "tooltip",
   "timerSize", "timerFont", "timerOutline", "timerColor", "timerPoint", "timerAlign", "timerX", "timerY",
   "stackSize", "stackFont", "stackOutline", "stackColor", "stackPoint", "stackAlign", "stackX", "stackY",
 }
@@ -742,6 +742,10 @@ local function StyleButton(part, d)
   ok = StyleString(part.count, part.button, d, "stack", part.stackFace) and ok
   -- Shown is Blizzard's, so hiding goes through alpha.
   ok = pcall(part.count.SetAlpha, part.count, d.hideStacks and 0 or 1) and ok
+  -- The button's own OnEnter shows the tooltip (Blizzard_AuraButton.lua).
+  -- Motion only, so clicks still reach the frame underneath.
+  ok = pcall(part.button.SetMouseMotionEnabled, part.button, d.tooltip ~= "never") and ok
+  ok = pcall(part.button.SetHideTooltipInCombat, part.button, d.tooltip == "out") and ok
   ok = StyleDispelBorders(part, d, skin ~= nil) and ok
   StyleCustomBorder(part.customBorder, d, skin and part.ring)
 

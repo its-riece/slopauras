@@ -46,6 +46,7 @@ local DEFAULTS = {
   borderWidth = 2, -- plain borders only
   lineSpacing = 2,
   layer = 0,
+  tooltip = "never", -- "always" or "out" (out of combat only)
   nameplateUnits = "enemy",
   hideWhenDead = true,
   hideWhenOffline = true,

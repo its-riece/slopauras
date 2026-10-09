@@ -192,6 +192,7 @@ local SHARED = {
   hideTimer = function() return Boolean end,
   hideStacks = function() return Boolean end,
   hideSwipe = function() return Boolean end,
+  tooltip = function() return OneOf(Set("never", "always", "out")) end,
   stackSize = function() return Number(6, 32) end,
   -- A LibSharedMedia name, which the importer may not have (StyleString falls
   -- back to the text's own font); false for the text's own font.

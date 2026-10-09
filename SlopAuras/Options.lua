@@ -752,6 +752,17 @@ local function SharedTabs(t, isDisplay, extra)
       break3 = Break(8.9),
       desaturate = Toggle("desaturate", 9, "Desaturate"),
       hideSwipe = Toggle("hideSwipe", 10, "Hide swipe"),
+      tooltip = Resettable({
+        type = "select", order = 10.5, name = Label("tooltip", "Tooltips"),
+        desc = Desc("tooltip", "Hover an icon to see the aura's tooltip. Your clicks still reach the frame "
+          .. "underneath. Mouseover macros miss that frame's unit while the cursor is on an icon."),
+        values = { never = "Never", always = "Always", out = "Out of combat" },
+        sorting = { "never", "always", "out" },
+        hidden = ListOnly,
+        get = function() return t.tooltip end,
+        -- A display saves "never" so it can override a group's choice.
+        set = function(_, value) Set("tooltip", (value ~= "never" or isDisplay) and value or nil) end,
+      }, "tooltip"),
       break4 = Break(10.9),
       timerText = TextBox("Timer", "timer", "hideTimer", "Hide timer"),
       stackText = TextBox("Stacks", "stack", "hideStacks", "Hide stacks"),
@@ -962,6 +973,7 @@ local function SharedTabs(t, isDisplay, extra)
     }),
     icon = Section(2, "Icon", {
       { "size", "zoom", "alpha" }, { "tintMode" }, { "tint" }, { "desaturate", "hideSwipe" },
+      { "tooltip" },
     }),
     text = Section(3, "Text", { { "timerText" }, { "stackText" } }),
     border = Section(4, "Border", {

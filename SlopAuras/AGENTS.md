@@ -72,6 +72,7 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
   give the wrong answer (`name`, the editor's asterisks).
 - **"Off" overrides:** a display that must drop a group value saves an explicit off value
   (`false` for `tint`, `glow`, `borderColor`; `"always"` for `combat`, `glowCombat`;
+  `"never"` for `tooltip`;
   `"auto"` for `hideWhenNotVisible`; `"any"` for `resting`, `mounted`; `"enemy"` for
   `nameplateUnits`; `"blizzard"` for `borderStyle`).
 - `SlopAuras.toc` `## SavedVariables: SlopAurasDB` = `{ nextID, groups = { ... } }`, shared by
@@ -184,7 +185,8 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
 
 Shared (group or display): `size`, `spacing`, `alpha`, `zoom`,
 `max`, `sort`, `sortReverse`, `desaturate`, `hideSwipe`, `tint`, `dispelBorder`,
-`borderColor`, `skin`, `borderStyle`, `borderWidth`, `hideTimer`, `hideStacks`, and per text
+`borderColor`, `skin`, `borderStyle`, `borderWidth`, `hideTimer`, `hideStacks`, `tooltip`
+(`"never"`, `"always"`, `"out"`), and per text
 (`timer…` for the countdown, `stack…` for the count): `Size`, `Font` (a LibSharedMedia name,
 `false` for the text's own), `Outline` (`NONE`, `OUTLINE`, `THICKOUTLINE`), `Color`, `Point`,
 `Align` (`LEFT`, `CENTER`, `RIGHT`), `X`, `Y`; `glow`, `glowCombat` (`"never"`
