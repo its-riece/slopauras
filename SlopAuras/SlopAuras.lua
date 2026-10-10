@@ -633,9 +633,10 @@ local function BuildRow(config, host)
 
   -- Everything in the row hangs off this 1px frame. On a unit frame it's a
   -- child of that frame, so it's raised with it (clicking raises a party
-  -- frame) and hidden with it. PlaceOrigin sets its level, before our
-  -- children are created: they start one level above their parent.
-  row.origin = CreateFrame("Frame", nil, host.frame or UIParent)
+  -- frame) and hidden with it. Not on nameplates: see FollowPlate. PlaceOrigin
+  -- sets its level, before our children are created: they start one level
+  -- above their parent.
+  row.origin = CreateFrame("Frame", nil, host.kind ~= "nameplate" and host.frame or UIParent)
   row.origin:SetSize(1, 1)
   if not PlaceOrigin(row, host) then
     table.insert(unresolved, { row = row, host = host })
@@ -1004,10 +1005,15 @@ end
 local function UpdateHost(host, relink)
   ReadState(host)
   for _, row in ipairs(host.rows) do
-    local changed = relink
+    local changed, showing = relink, false
     for _, line in ipairs(row.lines) do
       changed = UpdateLine(line) or changed
+      showing = showing or (line.list and line.list.active) or false
+      for _, inst in ipairs(line.missing) do
+        showing = showing or inst.active
+      end
     end
+    row.showing = showing
     if changed then
       dirty[row] = true
     end
@@ -1179,7 +1185,7 @@ end
 -- Nameplates -----------------------------------------------------------------
 -- The game reuses a small set of nameplate frames for whichever units are
 -- nearby. A host is tied to a plate frame the first time it appears and stays
--- there: re-parenting makes every button under it lay out again. Plates often
+-- there, so its rows are anchored once per plate frame. Plates often
 -- appear in combat, when containers can't be built, so every host is built at
 -- login: one per nameplate unit token (nameplate1-40), the most plates there
 -- can be at once. Idle hosts cost memory but no CPU (a disabled container
@@ -1209,13 +1215,12 @@ local function OnPlateAdded(unit)
       return
     end
     plateHosts[plate] = host
-    -- Rows live on the plate itself, not Blizzard's UnitFrame inside it:
+    -- Rows follow the plate itself, not Blizzard's UnitFrame inside it:
     -- nameplate addons hide or disable that UnitFrame and draw their own,
     -- but every one keeps the plate, which the engine places over the unit.
     local frame = plate
     host.frame = frame
     for _, row in ipairs(host.rows) do
-      row.origin:SetParent(frame)
       PlaceOrigin(row, host)
     end
   end
@@ -1230,6 +1235,42 @@ local function OnPlateRemoved(unit)
     end
   end
 end
+
+-- Rows sit on UIParent and are only anchored to their plate. As children of
+-- the plate, they cost every frame even while hidden: in a city full of
+-- players, 140 fps dropped to 50 with every nameplate group hidden. The game
+-- updates plates every frame (fading and scaling them by distance), and that
+-- reaches every descendant. Rows copy the plate's alpha and scale instead,
+-- rounded to steps so a fade changes them a few times rather than every
+-- frame, and only while they show something.
+local FOLLOW_STEP = 0.05
+
+local function Step(value)
+  return math.floor(value / FOLLOW_STEP + 0.5) * FOLLOW_STEP
+end
+
+local function FollowPlate(plate, host)
+  local alpha, scale = plate:GetEffectiveAlpha(), plate:GetEffectiveScale()
+  if issecretvalue(alpha) or issecretvalue(scale) then
+    return
+  end
+  alpha, scale = Step(alpha), math.max(Step(scale / UIParent:GetEffectiveScale()), FOLLOW_STEP)
+  for _, row in ipairs(host.rows) do
+    if row.showing and (row.alpha ~= alpha or row.scale ~= scale) then
+      row.alpha, row.scale = alpha, scale
+      row.origin:SetAlpha(alpha)
+      row.origin:SetScale(scale)
+    end
+  end
+end
+
+CreateFrame("Frame"):SetScript("OnUpdate", function()
+  for plate, host in pairs(plateHosts) do
+    if host.unit then
+      FollowPlate(plate, host)
+    end
+  end
+end)
 
 -- Binds plates that were already up before we were built. Only matters when
 -- building had to wait for auras to stop being secret: on a combat /reload

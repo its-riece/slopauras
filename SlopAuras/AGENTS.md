@@ -109,7 +109,10 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
   a single row (`ns.SingleRow`, `LineWrap`): other lines keep a fixed height.
 - **Anchoring:** `anchorTo = "unit"` rows hang off the host's frame (unit frames, compact
   party/raid frames, the nameplate itself, not Blizzard's UnitFrame inside it, which
-  nameplate addons hide). Screen/frame rows of all hosts join one strand (`Strand`).
+  nameplate addons hide). Nameplate rows are only anchored to the plate and parented to
+  UIParent: as plate descendants they cost every frame, hidden or not (a city full of plates
+  went from 140 to 50 fps). `FollowPlate` copies the plate's alpha and scale onto rows that
+  show something, in 0.05 steps. Screen/frame rows of all hosts join one strand (`Strand`).
   Nameplate lines add `INCLUDE_NAME_PLATE_ONLY` to their filters, as Blizzard's plates do.
 
 ## Masque (optional)
