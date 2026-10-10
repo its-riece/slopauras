@@ -66,6 +66,10 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
 
 - **Group:** placement (`target`, `anchorTo`, `anchor`, `growth`, `lines`, `lineSpacing`,
   `firstLine`) and an ordered `displays` list. Any display key on a group is a default.
+- **Line break:** a `{ mode = "break" }` entry in `displays`; the displays after it start a
+  new line. One before the first display, after the last or right after another is
+  ignored. Loops that want displays only use `ns.Displays(group)`, which skips breaks and
+  numbers the displays as the editor does.
 - **Display:** one aura group in a line (or a missing icon).
 - **Inheritance:** display → group → `DEFAULTS`, via metatables (`ns.Prepare`). SlopAuras
   saves only raw values. Read a display's own value with `rawget` when inheritance would
@@ -137,11 +141,14 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
   0.1s later, out of combat (`Apply`).
 - Each row has a **signature** (`ComputeRows`): group identity, growth, lines, cap, and each
   display's mode and line break. SlopAuras updates rows in place (`Chain.Configure`) and
-  rebuilds only what it must. A row whose signature changed but whose **shape** didn't (the
-  signature minus how many list displays each line has) is rebound instead (`CanRebind`,
-  `RebindRow`): `Chain.Resize` gives a line more or fewer aura groups, turning extra ones
-  off and keeping them as spares. So reordering, adding, deleting and moving list displays
-  builds no new containers. Building is slow: each aura group makes 10 buttons up front.
+  rebuilds only what it must. A row whose signature changed but whose **shape** didn't (group
+  identity, growth, where lines go, first line only) is kept, and `AssignLines` hands its
+  containers to the lines as they are now: a list line takes a container that fits
+  (`Chain.CanResize`; `Chain.Resize` turns extra aura groups off as spare slots), a missing
+  display one with the same Masque registration (`Chain.CanSetDisplay`). Containers no line
+  takes stay on the row, turned off, as spares for later edits. Only what's missing is
+  built, so editing displays and line breaks rarely builds anything. Building is slow: each
+  aura group makes 10 buttons up front. Reused containers keep their `/fstack` names.
 - WoW can't destroy frames. A rebuilt row's old containers get hidden and disabled, and
   stay in memory until `/reload`. Past `RELOAD_HINT` retired containers, the editor
   suggests a reload.
@@ -201,7 +208,7 @@ know; at least one positive must be known), `hideWhenPlayerDead`, `class`, `name
 `hideWhenOffline`, `hideWhenNotVisible`.
 
 Display only: `name`, `mode` (`list`, `missing`), `filter` (absent = `"HELPFUL"`; a group
-`filter` from older saves or strings moves to its displays, `ns.MoveGroupFilter`), `newLine`, `wrap` (icons per row on
+`filter` from older saves or strings moves to its displays, `ns.MoveGroupFilter`), `wrap` (icons per row on
 the line this display starts), `spellIDs` and
 `rankSpellIDs` (sets `{ [id] = true }`, `false` = exclude), `dispelTypes`, `maxDuration`
 (seconds, the container's `maxDuration` candidate filter), `icon`.
@@ -209,7 +216,8 @@ the line this display starts), `spellIDs` and
 On load, `LoadSettings` drops displays with any other `mode` and the retired keys in
 `RETIRED_KEYS` (SlopAuras.lua). A key that stops being used goes there, so old saves still
 export strings that import accepts. A group's `lineMax` (older saves and strings) is
-converted on load and import by `ns.ConvertLineMax`.
+converted on load and import by `ns.ConvertLineMax`, and a display's `newLine` becomes a
+line break before it (`ns.ConvertNewLine`; a single display's string just drops it).
 
 Group only: `id`, `name`, `target`, `anchorTo`, `anchor` (`{ point, frameName, relativePoint,
 x, y }`), `growth`, `lines`, `lineSpacing`, `firstLine` (`true`: show only the first

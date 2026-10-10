@@ -84,9 +84,25 @@ local function Migrate(db)
   db.profiles, db.profileKeys = nil, nil
 end
 
--- Display modes this version draws. A display saved with any other mode is
--- dropped: SplitLines would otherwise draw it as an aura list.
-local MODES = { list = true, missing = true }
+-- A group's display list also holds line breaks, { mode = "break" }: the
+-- displays after one start a new line. Iterates the displays alone, giving
+-- each one's number among them (as the editor shows it) and its list index.
+function ns.Displays(group)
+  local list, index, number = group.displays, 0, 0
+  return function()
+    repeat
+      index = index + 1
+    until not list[index] or list[index].mode ~= "break"
+    if list[index] then
+      number = number + 1
+      return number, list[index], index
+    end
+  end
+end
+
+-- Display modes this version draws, and line breaks. A display saved with any
+-- other mode is dropped: SplitLines would otherwise draw it as an aura list.
+local MODES = { list = true, missing = true, ["break"] = true }
 -- Keys nothing reads any more. Export writes every raw key and import rejects
 -- unknown ones, so they're dropped too.
 local RETIRED_KEYS = { "locHide", "labelSize" }
@@ -118,21 +134,38 @@ function ns.ConvertLineMax(group)
   if cap ~= 1 or group.growth == "CENTER" or group.growth == "CENTER_VERTICAL" then
     return -- centered lines ignored it
   end
-  for j, display in ipairs(group.displays) do
-    if j > 1 and display.newLine then
+  for n, display in ns.Displays(group) do
+    if n > 1 and display.newLine then
       return
     end
   end
   group.firstLine = true
-  for j, display in ipairs(group.displays) do
-    display.newLine = j > 1 or nil
+  for n, display in ns.Displays(group) do
+    display.newLine = n > 1 or nil
     display.max = 1
   end
+end
+
+-- `newLine` (older saves and import strings) marked a display that starts a
+-- line. It becomes a line break before that display. Also takes import
+-- tables, after validation.
+function ns.ConvertNewLine(group)
+  local list = {}
+  for _, entry in ipairs(group.displays) do
+    local last = list[#list]
+    if entry.newLine and last and last.mode ~= "break" then
+      table.insert(list, { mode = "break" })
+    end
+    entry.newLine = nil
+    table.insert(list, entry)
+  end
+  group.displays = list
 end
 
 local function Clean(group)
   ns.MoveGroupFilter(group)
   ns.ConvertLineMax(group)
+  ns.ConvertNewLine(group)
   for _, key in ipairs(RETIRED_KEYS) do
     group[key] = nil
   end
@@ -220,7 +253,7 @@ local masqueFlags = ""
 local function MasqueFlags()
   local flags = {}
   for _, group in ipairs(ns.groups) do
-    for _, display in ipairs(group.displays) do
+    for _, display in ns.Displays(group) do
       flags[#flags + 1] = display.skin == "masque" and "1" or "0"
     end
   end
@@ -232,7 +265,7 @@ local function ComputeRows()
   local rows = {}
   for _, group in ipairs(ns.groups) do
     local targets = TargetSet(group.target)
-    if not ClassAllowed(group) or #group.displays == 0 then
+    if not ClassAllowed(group) or not ns.Displays(group)() then
       -- not loaded on this character
     elseif not targets then
       Warn(("group %s: unknown target in %s"):format(tostring(group.name), tostring(group.target)))
@@ -241,35 +274,31 @@ local function ComputeRows()
     else
       -- Which group, growing which way, and each display's mode and line.
       -- Display identity is left out: reordering displays of the same mode
-      -- keeps the row and rebinds it (RebindRow). The group's identity is its
+      -- keeps the row as it is. The group's identity is its
       -- table (tostring gives its address).
       local lines = Chain.Lines(group.growth, group.lines)
       local parts = {
         tostring(group), group.growth, lines, group.firstLine and "first line" or "",
       }
-      -- The shape leaves out how many list displays each line has: a row of
-      -- the same shape is adapted in place (CanRebind, RebindRow) instead of
-      -- rebuilt.
-      local shape, lineHasList = { unpack(parts) }, false
-      for j, display in ipairs(group.displays) do
-        local newLine = j > 1 and display.newLine and "/" or ""
-        -- Only Masque-style displays' buttons are registered with Masque.
-        local masque = display.skin == "masque" and "+masque" or ""
-        table.insert(parts, newLine .. display.mode .. masque)
-        if newLine ~= "" then
-          lineHasList = false
-          table.insert(shape, "/")
-        end
-        if display.mode == "missing" then
-          table.insert(shape, "missing" .. masque)
-        elseif not lineHasList then
-          lineHasList = true
-          table.insert(shape, "list")
+      -- The shape leaves out the displays and lines: a row of the same shape
+      -- is kept and its containers handed to the lines (AssignLines).
+      local shape = table.concat(parts, "|")
+      -- A break only counts between displays, as in SplitLines.
+      local started, broken = false, false
+      for _, display in ipairs(group.displays) do
+        if display.mode == "break" then
+          broken = started
+        else
+          local newLine = broken and "/" or ""
+          started, broken = true, false
+          -- Only Masque-style displays' buttons are registered with Masque.
+          local masque = display.skin == "masque" and "+masque" or ""
+          table.insert(parts, newLine .. display.mode .. masque)
         end
       end
       table.insert(rows, {
         group = group, targets = targets, lines = lines, signature = table.concat(parts, "|"),
-        shape = table.concat(shape, "|"),
+        shape = shape,
       })
     end
   end
@@ -350,17 +379,23 @@ local function EachInst(row)
   end
 end
 
--- Splits a group's displays into lines: a display with newLine starts the
--- next one. Missing-icon displays have their own frames and sit after the
--- line's list displays.
+-- Splits a group's displays into lines at its line breaks. A break before the
+-- first display, after the last or right after another makes no line.
+-- Missing-icon displays have their own frames and sit after the line's list
+-- displays. `j` is the display's number (ns.Displays).
 local function SplitLines(group)
-  local lines, line = {}, nil
-  for j, d in ipairs(group.displays) do
-    if not line or (j > 1 and d.newLine) then
-      line = { listDisplays = {}, missingDisplays = {} }
-      table.insert(lines, line)
+  local lines, line, broken, j = {}, nil, false, 0
+  for _, d in ipairs(group.displays) do
+    if d.mode == "break" then
+      broken = line ~= nil
+    else
+      if not line or broken then
+        line, broken = { listDisplays = {}, missingDisplays = {} }, false
+        table.insert(lines, line)
+      end
+      j = j + 1
+      table.insert(d.mode == "missing" and line.missingDisplays or line.listDisplays, { d = d, j = j })
     end
-    table.insert(d.mode == "missing" and line.missingDisplays or line.listDisplays, { d = d, j = j })
   end
   return lines
 end
@@ -444,7 +479,7 @@ local Masque = LibStub("Masque", true)
 local skins, skinNames = {}, {} -- group id -> Masque group, name it was given
 
 local function UsesMasque(group)
-  for _, display in ipairs(group.displays) do
+  for _, display in ns.Displays(group) do
     if display.skin == "masque" then
       return true
     end
@@ -489,8 +524,104 @@ local function StyleFirstLine(row)
   if row.firstLineWindow then
     local group = row.group
     local clip = ns.SingleRow(group) and not ns.FirstLineConflict(group)
-    Chain.StyleFirstLine(row.firstLineWindow, row.origin, row.g, group.displays, group.lineSpacing, clip,
+    local displays = {}
+    for n, display in ns.Displays(group) do
+      displays[n] = display
+    end
+    Chain.StyleFirstLine(row.firstLineWindow, row.origin, row.g, displays, group.lineSpacing, clip,
       skins[tostring(group.id)])
+  end
+end
+
+local function ListDisplays(line)
+  local displays = {}
+  for k, entry in ipairs(line.listDisplays) do
+    displays[k] = entry.d
+  end
+  return displays
+end
+
+-- Removes and returns the first container in `pool` that `fits`, or nil.
+local function Take(pool, fits)
+  for k, inst in ipairs(pool) do
+    if fits(inst) then
+      return table.remove(pool, k)
+    end
+  end
+end
+
+-- Gives the row's lines, as its group's displays split now, their
+-- containers. Building is slow (each aura group makes 10 buttons up front,
+-- and nameplate groups exist on 40 hosts), so a line first takes one the
+-- row already has: list lines one whose slots match Masque-wise
+-- (Chain.CanResize), missing displays one with the same Masque registration.
+-- Only what's left is built. Containers no line takes are turned off and kept
+-- as spares for later edits, so moving a line break and back builds nothing.
+-- Out of combat.
+local function AssignLines(row, host)
+  local group, lists, missing = row.group, row.spareLists, row.spareMissing
+  for _, line in ipairs(row.lines) do
+    if line.list then
+      table.insert(lists, line.list)
+    end
+    for _, inst in ipairs(line.missing) do
+      table.insert(missing, inst)
+    end
+  end
+  local unit, name, plate = host.unit or "player", group.name or "Group", host.kind == "nameplate"
+  local skin = skins[tostring(group.id)]
+  local function Reuse(inst)
+    if inst.unit ~= unit then
+      Chain.SetUnit(inst, unit)
+    end
+    return inst
+  end
+
+  row.lines = SplitLines(group)
+  for i, line in ipairs(row.lines) do
+    -- Later lines start at their own 1px origin, anchored by Relink. It may be
+    -- anchored to a container, hence the template.
+    if not row.origins[i] then
+      row.origins[i] = CreateFrame("Frame", nil, row.origin, "DisableUntrustedLayoutScriptsTemplate")
+      row.origins[i]:SetSize(1, 1)
+    end
+    line.origin = row.origins[i]
+    if #line.listDisplays > 0 then
+      local displays = ListDisplays(line)
+      local function Fits(inst)
+        return inst.skin == skin and Chain.CanResize(inst, displays)
+      end
+      -- Preferably one with enough aura groups already (Resize adds the rest).
+      line.list = Take(lists, function(inst) return inst.slots >= #displays and Fits(inst) end)
+          or Take(lists, Fits)
+      if line.list then
+        Chain.Resize(Reuse(line.list), displays, row.g, group.lineSpacing)
+      else
+        line.list = Chain.NewList(row.parent, unit, displays, row.g, group.lineSpacing,
+          ("%s line %d"):format(name, i), plate, skin)
+        Chain.SetWrap(line.list, LineWrap(group, line))
+      end
+    end
+    line.missing = {}
+    for _, entry in ipairs(line.missingDisplays) do
+      local inst = Take(missing, function(inst) return inst.skin == skin and Chain.CanSetDisplay(inst, entry.d) end)
+      if inst then
+        Chain.SetDisplay(Reuse(inst), entry.d)
+      else
+        inst = Chain.NewMissing(row.parent, unit, entry.d, row.g, group.lineSpacing,
+          ("%s %d"):format(name, entry.j), plate, skin)
+      end
+      table.insert(line.missing, inst)
+    end
+  end
+
+  for _, spares in ipairs({ lists, missing }) do
+    for _, inst in ipairs(spares) do
+      if inst.active ~= false then
+        Chain.SetActive(inst, false)
+        inst.active = false
+      end
+    end
   end
 end
 
@@ -510,41 +641,16 @@ local function BuildRow(config, host)
     table.insert(unresolved, { row = row, host = host })
   end
 
-  local unit, name = host.unit or "player", group.name or "Group"
-  local skin = skins[tostring(group.id)]
   -- Containers go inside the first line window when there is one, so it clips
   -- them.
-  local parent = row.origin
+  row.parent = row.origin
   if group.firstLine then
-    row.firstLineWindow = Chain.NewFirstLineWindow(row.origin, name)
-    parent = row.firstLineWindow
+    row.firstLineWindow = Chain.NewFirstLineWindow(row.origin, group.name or "Group")
+    row.parent = row.firstLineWindow
   end
-  row.lines = SplitLines(group)
-  for i, line in ipairs(row.lines) do
-    -- Later lines start at their own 1px origin, anchored by Relink. It may be
-    -- anchored to a container, hence the template.
-    if i == 1 then
-      line.origin = row.origin
-    else
-      line.origin = CreateFrame("Frame", nil, row.origin, "DisableUntrustedLayoutScriptsTemplate")
-      line.origin:SetSize(1, 1)
-    end
-    if #line.listDisplays > 0 then
-      local displays = {}
-      for k, entry in ipairs(line.listDisplays) do
-        displays[k] = entry.d
-      end
-      line.list = Chain.NewList(parent, unit, displays, row.g, group.lineSpacing, ("%s line %d"):format(name, i),
-        host.kind == "nameplate", skin)
-      Chain.SetWrap(line.list, LineWrap(group, line))
-    end
-    line.missing = {}
-    for _, entry in ipairs(line.missingDisplays) do
-      local label = ("%s %d"):format(name, entry.j)
-      table.insert(line.missing,
-        Chain.NewMissing(parent, unit, entry.d, row.g, group.lineSpacing, label, host.kind == "nameplate", skin))
-    end
-  end
+  -- Line i starts at origins[i]; spares are containers no line uses now.
+  row.origins, row.lines, row.spareLists, row.spareMissing = { row.origin }, {}, {}, {}
+  AssignLines(row, host)
   StyleFirstLine(row)
 
   return row
@@ -553,6 +659,11 @@ end
 local function ReleaseRow(row)
   for inst in EachInst(row) do
     leaked = leaked + Chain.Release(inst)
+  end
+  for _, spares in ipairs({ row.spareLists, row.spareMissing }) do
+    for _, inst in ipairs(spares) do
+      leaked = leaked + Chain.Release(inst)
+    end
   end
   row.origin:Hide()
   row.released = true
@@ -675,57 +786,19 @@ local function FlushRelinks()
   end
 end
 
--- A kept row's displays may have been reordered: same modes and lines, other
--- tables. Points its lines and containers at the current ones.
-local function ListDisplays(line)
-  local displays = {}
-  for k, entry in ipairs(line.listDisplays) do
-    displays[k] = entry.d
-  end
-  return displays
-end
-
--- Whether a row of the same shape (ComputeRows) can take its group's
--- displays as they are now. Lines with list displays keep them, though their
--- number may change (Chain.Resize).
-local function CanRebind(row)
-  for i, fresh in ipairs(SplitLines(row.group)) do
-    local list = row.lines[i].list
-    if list and not Chain.CanResize(list, ListDisplays(fresh)) then
-      return false
-    end
-  end
-  return true
-end
-
--- Points a row of the same shape at its group's displays: reordered, added
--- or removed list displays reuse the line containers.
-local function RebindRow(row)
-  for i, fresh in ipairs(SplitLines(row.group)) do
-    local line = row.lines[i]
-    line.listDisplays, line.missingDisplays = fresh.listDisplays, fresh.missingDisplays
-    if line.list then
-      Chain.Resize(line.list, ListDisplays(fresh), row.g, row.group.lineSpacing)
-    end
-    for k, entry in ipairs(fresh.missingDisplays) do
-      Chain.SetDisplay(line.missing[k], entry.d)
-    end
-  end
-end
-
--- An old row with `config`'s shape that can take its displays, or nil. The
--- shape includes the group's identity, so the row is already that group's.
+-- An old row with `config`'s shape, or nil. The shape includes the group's
+-- identity, so the row is already that group's.
 local function SameShape(old, config)
   for _, row in pairs(old) do
-    if row.shape == config.shape and CanRebind(row) then
+    if row.shape == config.shape then
       return row
     end
   end
 end
 
--- Brings a host's rows in line with rowConfigs: keeps rows whose signature
--- is unchanged, adapts rows of the same shape, builds new ones, retires the
--- rest.
+-- Brings a host's rows in line with rowConfigs: keeps rows of the same shape
+-- and gives their lines containers (AssignLines), builds new ones, retires
+-- the rest.
 local function SyncHost(host)
   local old, rows, bySignature = host.rowsBySignature or {}, {}, {}
   for _, config in ipairs(rowConfigs) do
@@ -734,7 +807,7 @@ local function SyncHost(host)
       if row then
         old[row.signature] = nil
         row.group, row.signature = config.group, config.signature
-        RebindRow(row)
+        AssignLines(row, host)
       else
         row = BuildRow(config, host)
       end

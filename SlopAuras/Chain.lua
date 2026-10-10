@@ -1014,6 +1014,7 @@ function Chain.NewList(parent, unit, displays, g, lineSpacing, label, plate, ski
   -- masque[j]: whether slot j's buttons are registered with Masque.
   local inst = {
     displays = displays, parts = {}, on = {}, inRange = true, plate = plate, skin = skin, slots = #displays, masque = {},
+    unit = unit,
   }
   inst.main = NewContainer(parent, unit, g)
   Name(inst.main, label)
@@ -1097,7 +1098,7 @@ end
 --             window. The icon and glow hang off its start corner, so when the
 --             aura shows up they move a full window back, out of sight.
 function Chain.NewMissing(parent, unit, d, g, lineSpacing, label, plate, skin)
-  local inst = { display = d, displays = { d }, inRange = true, plate = plate, skin = skin }
+  local inst = { display = d, displays = { d }, inRange = true, plate = plate, skin = skin, unit = unit }
   inst.main = NewContainer(parent, unit, g)
   Name(inst.main, label .. " (presence)")
   AddGroup(inst, inst.main, 1, d, GroupOptions(d, g, lineSpacing, false, 1))
@@ -1327,6 +1328,12 @@ end
 -- reorder needs no new containers. Configure then pushes its settings.
 function Chain.SetDisplay(inst, d)
   inst.displays[1], inst.display = d, d
+end
+
+-- Whether missing display `inst` can take `d` through Chain.SetDisplay: its
+-- holder's Masque registration is fixed when it's made.
+function Chain.CanSetDisplay(inst, d)
+  return (inst.ring ~= nil) == UsesMasque(inst, d)
 end
 
 -- Containers don't notice when a token like "target" or "party1" starts

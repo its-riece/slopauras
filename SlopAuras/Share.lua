@@ -282,7 +282,7 @@ local DISPLAY_ONLY = {
   end,
   mode = function() return OneOf(Set("list", "missing")) end,
   filter = function() return Filter end,
-  newLine = function() return Boolean end,
+  newLine = function() return Boolean end, -- converted, see ns.ConvertNewLine
   wrap = function() return Number(1, 40) end,
   spellIDs = function() return SpellIDs end,
   rankSpellIDs = function() return SpellIDs end,
@@ -352,7 +352,16 @@ local GROUP_ONLY = {
       end
       local displays = {}
       for i, display in ipairs(value) do
-        displays[i] = ValidateDisplay(display, ("%s[%d]"):format(path, i))
+        local itemPath = ("%s[%d]"):format(path, i)
+        if type(display) == "table" and display.mode == "break" then
+          -- A line break, saved as { mode = "break" } (ns.Displays).
+          if next(display, next(display)) then
+            Fail(itemPath, "is a line break, which takes no other keys")
+          end
+          displays[i] = { mode = "break" }
+        else
+          displays[i] = ValidateDisplay(display, itemPath)
+        end
       end
       return displays
     end
@@ -393,7 +402,16 @@ local function ValidateGroup(value, path)
   end
   group.displays = group.displays or {}
   ns.ConvertLineMax(group)
+  ns.ConvertNewLine(group)
   return group
+end
+
+-- A display on its own takes its line from where it's put, so an older
+-- string's newLine is dropped.
+local function ValidateOneDisplay(value)
+  local display = ValidateDisplay(value, "display")
+  display.newLine = nil
+  return display
 end
 
 local function ValidateConfig(value)
@@ -521,7 +539,7 @@ local KIND_NAMES = { config = "a full config", group = "a group", display = "a d
 local VALIDATORS = {
   config = ValidateConfig,
   group = function(value) return ValidateGroup(value, "group") end,
-  display = function(value) return ValidateDisplay(value, "display") end,
+  display = ValidateOneDisplay,
 }
 
 -- Returns the saved form of `text` if it holds `kind`, or nil and a message.

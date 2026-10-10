@@ -199,16 +199,18 @@ end
 
 -- Displays -------------------------------------------------------------------
 
--- Whether display `index` starts a line that can wrap (LineWrap in
--- SlopAuras.lua): the line has no missing displays, the group isn't showing
--- only its first line, and its lines aren't shared by several units.
+-- Whether the display at list index `index` starts a line that can wrap
+-- (LineWrap in SlopAuras.lua): it's the first display, or the first after a
+-- line break; the line has no missing displays, the group isn't showing only
+-- its first line, and its lines aren't shared by several units.
 local function CanWrap(group, index)
   local list = group.displays
-  if (index > 1 and not list[index].newLine) or group.firstLine or not ns.SingleRow(group) then
+  local prev = list[index - 1]
+  if prev and prev.mode ~= "break" or group.firstLine or not ns.SingleRow(group) then
     return false
   end
   for j = index, #list do
-    if j > index and list[j].newLine then
+    if list[j].mode == "break" then
       break
     end
     if list[j].mode == "missing" then
@@ -938,7 +940,7 @@ local function SharedTabs(t, isDisplay, extra)
 
   -- The Appearance controls in sections, each row ended explicitly. A row,
   -- or a section, whose controls are all hidden is hidden too. `extra`: a
-  -- display's own controls (Start a new line, Icons per row).
+  -- display's own controls (Icons per row).
   local controls = look.args
   for key, option in pairs(extra or {}) do
     controls[key] = option
@@ -986,7 +988,7 @@ local function SharedTabs(t, isDisplay, extra)
   end
   look.args = {
     layout = Section(1, "Arrangement", {
-      { "newLine" }, { "max", "wrap", "spacing" }, { "sort", "sortReverse" },
+      { "max", "wrap", "spacing" }, { "sort", "sortReverse" },
     }),
     icon = Section(2, "Icon", {
       { "size", "zoom", "alpha" }, { "tintMode" }, { "tint" }, { "desaturate", "hideSwipe" },
@@ -1275,7 +1277,6 @@ local function GroupShareTab(group)
               Say(state, problem, "error")
               return false
             end
-            display.newLine = nil -- a new last display joins the last line
             table.insert(group.displays, display)
             ns.Prepare(group)
             Changed(true)
@@ -1305,8 +1306,6 @@ local function DisplayShareTab(group, display, index)
             Say(state, problem, "error")
             return false
           end
-          -- Same place in the group: same line as before.
-          imported.newLine = rawget(display, "newLine")
           group.displays[index] = imported
           ns.Prepare(group)
           Changed(true)
@@ -1374,7 +1373,9 @@ local function DispelTypesBox(display)
   return { type = "group", inline = true, order = 6.5, name = "Dispel types", args = args }
 end
 
-local function DisplayOptions(group, display, index)
+-- `index`: the display's place in the group's list, line breaks included,
+-- which also keys its tree entry; `number`: its place among the displays.
+local function DisplayOptions(group, display, index, number)
   local list = group.displays
 
   -- Displays are keyed by position (d1, d2, ...), so the selection has to
@@ -1494,15 +1495,6 @@ local function DisplayOptions(group, display, index)
   what.args.mode.desc = "\"Icon when none match\" draws at the end of its line, after the line's other icons."
 
   local look, load = SharedTabs(display, true, {
-    newLine = {
-      type = "toggle", width = 1.5, name = "Start a new line", hidden = index == 1,
-      desc = "Puts this display and the ones after it on a new line. The group's Layout tab sets where new lines go.",
-      get = function() return rawget(display, "newLine") == true end,
-      set = function(_, value)
-        display.newLine = value or nil
-        Changed(true)
-      end,
-    },
     wrap = {
       type = "range", name = "Icons per row", min = 0, max = 40, step = 1,
       desc = "Starts another row of this line after this many icons. 0: one row. "
@@ -1519,7 +1511,7 @@ local function DisplayOptions(group, display, index)
 
   return {
     type = "group", order = 100 + index, childGroups = "tab",
-    name = function() return DisplayName(display, index) end,
+    name = function() return DisplayName(display, number) end,
     args = {
       -- Drawn above the tabs: no box or title (unnamed inline group), a
       -- horizontal rule (empty header) between the button pairs.
@@ -1599,7 +1591,6 @@ local function DisplayOptions(group, display, index)
               end
               movingDisplay = nil
               table.remove(list, index)
-              display.newLine = nil -- a new last display joins the last line
               table.insert(target.displays, display)
               ns.Prepare(target)
               Changed(true)
@@ -1612,6 +1603,37 @@ local function DisplayOptions(group, display, index)
       look = look,
       load = load,
       share = DisplayShareTab(group, display, index),
+    },
+  }
+end
+
+-- A line break's tree entry, gray so it doesn't read as a display. Keyed by
+-- list index like displays ("b" instead of "d").
+local function BreakOptions(group, index)
+  local list = group.displays
+  local function MoveBreak(by)
+    if Move(list, index, by) then
+      AceConfigDialog:SelectGroup(addonName, "g" .. group.id, "b" .. (index + by))
+    end
+  end
+  return {
+    type = "group", order = 100 + index, name = "|cff999999Line break|r",
+    args = {
+      intro = {
+        type = "description", order = 0, width = "full",
+        name = "Displays after this start a new line. Set where new lines go in the group's Layout tab.",
+      },
+      introBreak = Break(0.5),
+      up = { type = "execute", order = 1, width = 0.62, name = "Move up", func = function() MoveBreak(-1) end },
+      down = { type = "execute", order = 2, width = 0.62, name = "Move down", func = function() MoveBreak(1) end },
+      delete = {
+        type = "execute", order = 3, width = 0.62, name = "Delete",
+        func = function()
+          table.remove(list, index)
+          Changed(true)
+        end,
+      },
+      buttonsBreak = Break(3.5),
     },
   }
 end
@@ -1678,9 +1700,17 @@ end
 -- A new display starts with the last display's filter: displays in one group
 -- usually match the same aura type.
 local function AddDisplay(group)
-  local last = group.displays[#group.displays]
+  local last
+  for _, display in ns.Displays(group) do
+    last = display
+  end
   table.insert(group.displays, { mode = "list", filter = last and rawget(last, "filter") })
   ns.Prepare(group)
+  Changed(true)
+end
+
+local function AddLineBreak(group)
+  table.insert(group.displays, { mode = "break" })
   Changed(true)
 end
 
@@ -1694,7 +1724,7 @@ local function LineControls(group)
     },
     lines = {
       type = "select", order = 2, name = "New lines go",
-      desc = "Where a display set to start a new line goes: across from the way icons grow.",
+      desc = "Displays after a line break go this way: across from the way icons grow.",
       values = function()
         if ns.Chain.Vertical(group.growth) then
           return { LEFT = "Left", RIGHT = "Right" }
@@ -1848,6 +1878,12 @@ local function GroupOptions(group, index)
         desc = "The new display lists matching auras. Set its Shows option to \"Icon when none match\" for a missing-aura icon.",
         func = function() AddDisplay(group) end,
       },
+      addBreak = {
+        type = "execute", order = 1.1, width = 0.8, name = "Add line break",
+        desc = "Displays you add after it start a new line. Move it up or down to split lines elsewhere.",
+        func = function() AddLineBreak(group) end,
+      },
+      addBreakRow = Break(1.5),
       duplicate = {
         type = "execute", order = 2, width = 0.8, name = "Duplicate group",
         desc = "Adds a copy of this group and its displays below it. The copy sits on top of the original until you move it.",
@@ -1892,8 +1928,13 @@ local function GroupOptions(group, index)
       args = tabs,
     },
   }
-  for i, display in ipairs(group.displays) do
-    args["d" .. i] = DisplayOptions(group, display, i)
+  for number, display, i in ns.Displays(group) do
+    args["d" .. i] = DisplayOptions(group, display, i, number)
+  end
+  for i, entry in ipairs(group.displays) do
+    if entry.mode == "break" then
+      args["b" .. i] = BreakOptions(group, i)
+    end
   end
 
   -- An alert icon in the tree while FirstLineWarning shows, so it's seen from
@@ -2064,7 +2105,7 @@ local function CarryTab(tab)
       Select({ key, "settings" })
     end
     if DISPLAY_TABS[tab] then
-      for i in ipairs(group.displays) do
+      for _, _, i in ns.Displays(group) do
         Select({ key, "d" .. i })
       end
     end
