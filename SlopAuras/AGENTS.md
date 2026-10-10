@@ -7,6 +7,9 @@ World of Warcraft: Forever, a Classic-based client (game type `camelot`) with
 Midnight-style secret values. It draws rows of aura icons on any frame. It builds them from
 Blizzard's AuraContainers, so it keeps working while aura data is secret.
 
+Source, issues and changelog: https://github.com/its-riece/slopauras. A downloaded copy may
+be older than the repo.
+
 ## Files
 
 Load order is the `.toc` order.
