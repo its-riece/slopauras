@@ -1348,7 +1348,7 @@ local function AddTopShare(args, order)
     imports = {
       {
         key = "all", button = "Import full config",
-        label = "Paste a full config here, then click Accept. Then choose to replace your groups or add these.",
+        label = "Paste a full config here, then click Accept. Then choose what to replace or add.",
         onText = function(text)
           local groups, problem = ns.Share.Import(text, "config")
           if not groups then
@@ -1379,6 +1379,15 @@ local function AddTopShare(args, order)
   args.shareReplaceAll = ChoiceButton(state, "config", order + 2, "Replace all my groups", function(pending)
     ReplaceAllGroups(pending.groups)
   end, "Delete all your groups and use the imported ones?")
+  args.shareReplaceMatching = ChoiceButton(state, "config", order + 2.05, "Update existing", function(pending)
+    AddGroups(pending.groups, true)
+  end)
+  args.shareReplaceMatching.desc = "Replaces your groups that share a name with an imported one. Adds the rest."
+  -- Without a name clash it would do the same as Add as new groups.
+  local configOnly = args.shareReplaceMatching.hidden
+  args.shareReplaceMatching.hidden = function()
+    return configOnly() or #Clashes(state.pending.groups) == 0
+  end
   args.shareAddAll = ChoiceButton(state, "config", order + 2.1, "Add as new groups", function(pending)
     OfferAdd(state, pending.groups)
   end)

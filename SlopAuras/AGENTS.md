@@ -282,7 +282,7 @@ Use the labels exactly as below; they are what the player sees. The editor says 
 - `SlopAuras:<VERSION>:<kind>:<json>`, kind `config`, `group` or `display`. `VERSION` is the
   string format version (now `1`), not the addon version. Bump it only for incompatible
   changes. Where each kind is pasted: `config` in Import full config (then Replace all my
-  groups, or Add as new groups), `group` in Import a group, `display` in a group's Import
+  groups, Update existing (replaces same-named groups, adds the rest; only when names match), or Add as new groups), `group` in Import a group, `display` in a group's Import
   display (added at the end) or a display's Import new settings (replaces it).
 - Import is strict: every key must be in the spec tables (`SHARED`, `DISPLAY_ONLY`,
   `GROUP_ONLY`), Share.lua checks every value and range, and nothing changes until the
