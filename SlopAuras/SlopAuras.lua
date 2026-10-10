@@ -284,6 +284,20 @@ local function BuildFlags()
   return table.concat(flags)
 end
 
+-- Every setting of the group and its displays, or nil if it can't be
+-- serialized.
+local function GroupJSON(group)
+  local ok, json = pcall(C_EncodingUtil.SerializeJSON, group)
+  return ok and json or nil
+end
+
+-- A row's signature, its group's settings and the skin epoch: while auras are
+-- secret a row can't be restyled, only rebuilt, so any change to it means a
+-- new row (SyncHost). Without `json`, a table that matches nothing.
+local function Fingerprint(signature, json)
+  return json and (signature .. "|" .. json .. "|" .. Chain.SkinEpoch()) or {}
+end
+
 local function ComputeRows()
   buildFlags = BuildFlags()
   local rows = {}
@@ -326,13 +340,9 @@ local function ComputeRows()
         table.insert(parts, "stack")
       end
       local signature = table.concat(parts, "|")
-      -- Every setting of the group and its displays, plus the skin epoch: while
-      -- auras are secret a row can't be restyled, only rebuilt, so any change
-      -- to it means a new row (SyncHost).
-      local ok, json = pcall(C_EncodingUtil.SerializeJSON, group)
       table.insert(rows, {
         group = group, targets = targets, lines = lines, signature = signature, shape = shape,
-        fingerprint = ok and (signature .. "|" .. json .. "|" .. Chain.SkinEpoch()) or {},
+        fingerprint = Fingerprint(signature, GroupJSON(group)),
       })
     end
   end
@@ -545,6 +555,22 @@ local function UsesMasque(group)
   return false
 end
 
+-- A skin or font change restyles every button (Chain.Reskinned bumps the
+-- epoch StyleText and row fingerprints include). While auras are secret,
+-- buttons can't be restyled and a new epoch would make Apply rebuild every
+-- row, so the change waits until they aren't (ADDON_RESTRICTION_STATE_CHANGED).
+local reskinPending = false
+
+local function Reskin()
+  if C_Secrets.ShouldAurasBeSecret() then
+    reskinPending = true
+    return
+  end
+  reskinPending = false
+  Chain.Reskinned()
+  ns.Changed(false)
+end
+
 local function SyncSkins()
   if not Masque then
     return
@@ -556,11 +582,8 @@ local function SyncSkins()
       live[id] = true
       if not skins[id] then
         skins[id] = Masque:Group(addonName, name, id)
-        -- A skin or option change in Masque restyles every button.
-        skins[id]:RegisterCallback(function()
-          Chain.Reskinned()
-          ns.Changed(false)
-        end)
+        -- A skin or option change in Masque.
+        skins[id]:RegisterCallback(Reskin)
       elseif skinNames[id] ~= name then
         skins[id]:SetName(name)
       end
@@ -1591,6 +1614,19 @@ local function Apply(structural)
       ConfigureHost(host)
     end
   end)
+  -- Every row now has the current settings, so it takes the current
+  -- fingerprint: with a stale one, the next apply while secret would rebuild
+  -- rows that didn't change.
+  local jsons = {}
+  for _, host in ipairs(hosts) do
+    for _, row in ipairs(host.rows) do
+      local group = row.group
+      if jsons[group] == nil then
+        jsons[group] = GroupJSON(group) or false
+      end
+      row.fingerprint = Fingerprint(row.signature, jsons[group] or nil)
+    end
+  end
 end
 
 local applyQueued, structuralPending = false, false
@@ -1660,12 +1696,23 @@ local function Build()
   ns.InitOptions()
 end
 
+-- Whether any display's timer or stack text uses font `name`.
+local function UsesFont(name)
+  for _, group in ipairs(ns.groups) do
+    for _, display in ns.Displays(group) do
+      if display.timerFont == name or display.stackFont == name then
+        return true
+      end
+    end
+  end
+  return false
+end
+
 -- Media addons can register fonts after we've styled; a saved font name that
--- wasn't there yet then takes effect.
-LibStub("LibSharedMedia-3.0").RegisterCallback(ns, "LibSharedMedia_Registered", function(_, mediaType)
-  if mediaType == "font" and built then
-    Chain.Reskinned()
-    ns.Changed(false)
+-- wasn't there yet then takes effect. Other fonts change nothing.
+LibStub("LibSharedMedia-3.0").RegisterCallback(ns, "LibSharedMedia_Registered", function(_, mediaType, name)
+  if mediaType == "font" and built and UsesFont(name) then
+    Reskin()
   end
 end)
 
@@ -1745,6 +1792,9 @@ events:SetScript("OnEvent", function(_, event, arg, arg2)
         Chain.HoldRange(false)
         for _, host in ipairs(hosts) do
           UpdateRange(host)
+        end
+        if reskinPending then
+          Reskin()
         end
       end
       if ns.OnLockChanged then

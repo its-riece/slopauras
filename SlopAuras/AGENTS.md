@@ -41,10 +41,13 @@ before relying on it.
   After `initializeFrame`, every call on an aura button or anything under it (icon,
   cooldown, count, our overlay) raises "forbidden object" (`DenyTaintedAccessWhenAurasAreSecret`,
   Blizzard_AuraContainerFrameProviders.lua:77-86). Building fresh containers works, under
-  combat lockdown too, with each button styled in `initializeFrame`. So nothing waits for
-  secrecy to end: while secret, `Apply` rebuilds changed rows instead of restyling them
-  (`SyncHost` keeps rows whose `fingerprint` matches; the `syncer` frame builds a few hosts
-  per frame within `BUILD_BUDGET_MS`) and `ConfigureHost` skips `Chain.Configure`. The
+  combat lockdown too, with each button styled in `initializeFrame`. So editor changes
+  don't wait for secrecy to end: while secret, `Apply` rebuilds changed rows instead of
+  restyling them (`SyncHost` keeps rows whose `fingerprint` matches; the `syncer` frame
+  builds a few hosts per frame within `BUILD_BUDGET_MS`) and `ConfigureHost` skips
+  `Chain.Configure`. Every apply out of secrecy refreshes each row's fingerprint, so only
+  rows changed since are rebuilt. Skin and font changes (`Reskin`) change every row's
+  fingerprint, so they wait until auras aren't secret (`reskinPending`). The
   editor never locks; only test mode does (`ns.TestLocked`). Glows that follow combat or
   range can't flip on built buttons: combat glows are two copies with combat loads
   (`GlowCopies`), and range glows show fully while secret (`Chain.HoldRange`).
@@ -61,7 +64,8 @@ before relying on it.
   styled after Masque, so their settings win over the skin (`StyleString`). The count's
   Text and Shown are Blizzard's (`SetApplicationCount`), so hiding it sets its alpha to 0.
   Fonts are fetched from LibSharedMedia by saved name, falling back to the text's own; a
-  font registered later restyles everything (`LibSharedMedia_Registered`).
+  font registered later restyles everything if a display uses it
+  (`LibSharedMedia_Registered`, `UsesFont`).
 - **Child frames draw over parent textures.** The cooldown swipe is a child frame, so the
   count, borders and glow live on an overlay frame one level above it.
 - **Spell ID filters** (`includeSpellIDs` / `excludeSpellIDs`) only apply to buffs on
@@ -167,7 +171,7 @@ below.
 - One Masque group per SlopAuras group with skinned displays (`SyncSkins`,
   SlopAuras.lua; static ID = group id), passed to `Chain.NewList` / `NewMissing` as
   `skin`. A Masque option change bumps `skinEpoch` (part of `StyleText`) and restyles
-  everything.
+  everything (`Reskin`; while auras are secret, once they aren't).
 - List buttons register `{ Icon, Cooldown, Count, Border }` as type "Aura"; missing icons
   register their holder with `{ Icon, Border }` (the ring only carries a custom color
   there). Masque draws the skin's frame art (Normal) itself.
