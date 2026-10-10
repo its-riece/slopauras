@@ -248,9 +248,22 @@ end
 
 local ALERT = "|TInterface\\DialogFrame\\UI-Dialog-Icon-AlertNew:0|t"
 
-local FIRST_LINE_TITLE = "\"Show only the first line\" doesn't work with these icon sizes"
+-- What the editor calls a line: a row when icons grow sideways, a column when
+-- they grow up or down. Players found "row" clearer than "line".
+local function RowWord(group, plural)
+  local word = ns.Chain.Vertical(group.growth) and "column" or "row"
+  return plural and word .. "s" or word
+end
 
--- Why "Show only the first line" is ignored (ns.FirstLineConflict), for the
+local function Capital(text)
+  return (text:gsub("^%l", string.upper))
+end
+
+local function FirstLineTitle(group)
+  return ("\"Show only the first %s\" doesn't work with these icon sizes"):format(RowWord(group))
+end
+
+-- Why "Show only the first row" is ignored (ns.FirstLineConflict), for the
 -- top of the group's Settings and of each of its displays, since sizes are
 -- usually changed on a display. With two lines, moving the smaller one last
 -- fixes it; with more, a line in between would be on top, so it joins the
@@ -263,12 +276,13 @@ local function FirstLineWarning(group, order)
       if not conflict then
         return ""
       end
+      local row, rows = RowWord(group), RowWord(group, true)
       local small, big = DisplayLabel(conflict.small.display), DisplayLabel(conflict.big.display)
-      local move = conflict.lines == 2 and "move it to the last line"
-          or ("put it on the same line as \"%s\""):format(DisplayLabel(conflict.last))
-      local body = ("\"%s\" (%dpx) is smaller than \"%s\" (%dpx). Make \"%s\" %dpx, or %s. All lines show until then.")
-          :format(small, conflict.small.size, big, conflict.big.size, small, conflict.big.size, move)
-      return ALERT .. " |cffff9933" .. FIRST_LINE_TITLE .. "|r\n" .. body
+      local move = conflict.lines == 2 and ("move it to the last %s"):format(row)
+          or ("put it on the same %s as \"%s\""):format(row, DisplayLabel(conflict.last))
+      local body = ("\"%s\" (%dpx) is smaller than \"%s\" (%dpx). Make \"%s\" %dpx, or %s. All %s show until then.")
+          :format(small, conflict.small.size, big, conflict.big.size, small, conflict.big.size, move, rows)
+      return ALERT .. " |cffff9933" .. FirstLineTitle(group) .. "|r\n" .. body
     end,
     hidden = function() return ns.FirstLineConflict(group) == nil end,
   }
@@ -946,7 +960,7 @@ local function SharedTabs(t, isDisplay, extra)
 
   -- The Appearance controls in sections, each row ended explicitly. A row,
   -- or a section, whose controls are all hidden is hidden too. `extra`: a
-  -- display's own controls (Icons per row).
+  -- display's own controls (Wrap after).
   local controls = look.args
   for key, option in pairs(extra or {}) do
     controls[key] = option
@@ -1408,7 +1422,10 @@ local function DisplayOptions(group, display, index, number)
       breakName = Break(0.6),
       mode = {
         type = "select", order = 1, name = "Shows", values = MODES,
-        desc = "An \"Icon when none match\" display draws at the end of its line, after the line's other icons.",
+        desc = function()
+          return ("An \"Icon when none match\" display draws at the end of its %s, after the %s's other icons.")
+              :format(RowWord(group), RowWord(group))
+        end,
         get = function() return display.mode end,
         set = function(_, value)
           display.mode = value
@@ -1498,13 +1515,19 @@ local function DisplayOptions(group, display, index, number)
     display.filter = text ~= "" and text or nil
     Changed(false)
   end)
-  what.args.mode.desc = "\"Icon when none match\" draws at the end of its line, after the line's other icons."
+  what.args.mode.desc = function()
+    return ("\"Icon when none match\" draws at the end of its %s, after the %s's other icons.")
+        :format(RowWord(group), RowWord(group))
+  end
 
   local look, load = SharedTabs(display, true, {
     wrap = {
-      type = "range", name = "Icons per row", min = 0, max = 40, step = 1,
-      desc = "Starts another row of this line after this many icons. 0: one row. "
-          .. "Counts icons at this display's size, so bigger icons later in the line fit fewer to a row.",
+      type = "range", name = "Wrap after", min = 0, max = 40, step = 1,
+      desc = function()
+        local text = "Wraps this %s after this many icons. 0: no wrapping. Counts icons at this display's size, "
+            .. "so bigger icons later in the %s fit fewer before it wraps."
+        return text:format(RowWord(group), RowWord(group))
+      end,
       hidden = function() return not CanWrap(group, index) end,
       get = function() return rawget(display, "wrap") or 0 end,
       set = function(_, value)
@@ -1613,8 +1636,8 @@ local function DisplayOptions(group, display, index, number)
   }
 end
 
--- A line break's tree entry, gray so it doesn't read as a display. Keyed by
--- list index like displays ("b" instead of "d").
+-- A line break's tree entry, a gray rule so it doesn't read as a display.
+-- Keyed by list index like displays ("b" instead of "d").
 local function BreakOptions(group, index)
   local list = group.displays
   local function MoveBreak(by)
@@ -1623,11 +1646,15 @@ local function BreakOptions(group, index)
     end
   end
   return {
-    type = "group", order = 100 + index, name = "|cff999999Line break|r",
+    type = "group", order = 100 + index, name = "|cff808080==============|r",
+    desc = function() return Capital(RowWord(group)) .. " break" end,
     args = {
       intro = {
         type = "description", order = 0, width = "full",
-        name = "Displays after this start a new line. Set where new lines go in the group's Layout tab.",
+        name = function()
+          return ("Displays after this start a new %s. Set where new %s go in the group's Layout tab.")
+              :format(RowWord(group), RowWord(group, true))
+        end,
       },
       introBreak = Break(0.5),
       up = { type = "execute", order = 1, width = 0.62, name = "Move up", func = function() MoveBreak(-1) end },
@@ -1729,8 +1756,11 @@ local function LineControls(group)
       get = growthGet, set = growthSet,
     },
     lines = {
-      type = "select", order = 2, name = "New lines go",
-      desc = "Displays after a line break go this way: across from the way icons grow.",
+      type = "select", order = 2,
+      name = function() return ("New %s go"):format(RowWord(group, true)) end,
+      desc = function()
+        return ("Displays after a %s break go this way: across from the way icons grow."):format(RowWord(group))
+      end,
       values = function()
         if ns.Chain.Vertical(group.growth) then
           return { LEFT = "Left", RIGHT = "Right" }
@@ -1744,8 +1774,9 @@ local function LineControls(group)
       end,
     },
     lineSpacing = {
-      type = "range", order = 3, name = "Line spacing", min = 0, max = 40, step = 1,
-      desc = "Gap between lines.",
+      type = "range", order = 3, min = 0, max = 40, step = 1,
+      name = function() return Capital(RowWord(group)) .. " spacing" end,
+      desc = function() return ("Gap between %s."):format(RowWord(group, true)) end,
       get = function() return group.lineSpacing end,
       set = function(_, value)
         group.lineSpacing = value
@@ -1754,8 +1785,9 @@ local function LineControls(group)
     },
     break1 = Break(3.5),
     firstLine = {
-      type = "toggle", order = 4, width = 1.5, name = "Show only the first line",
-      desc = "Shows only the first line with icons, hides the rest.",
+      type = "toggle", order = 4, width = 1.5,
+      name = function() return ("Show only the first %s"):format(RowWord(group)) end,
+      desc = function() return ("Shows only the first %s with icons, hides the rest."):format(RowWord(group)) end,
       -- Lines shared by several units keep their height, so nothing moves up.
       hidden = function() return not ns.SingleRow(group) end,
       get = function() return group.firstLine == true end,
@@ -1765,7 +1797,10 @@ local function LineControls(group)
       end,
     },
   }
-  return { type = "group", inline = true, order = 1, name = "Lines", args = args }
+  return {
+    type = "group", inline = true, order = 1, args = args,
+    name = function() return Capital(RowWord(group, true)) end,
+  }
 end
 
 local function LayoutTab(group)
@@ -1885,8 +1920,12 @@ local function GroupOptions(group, index)
         func = function() AddDisplay(group) end,
       },
       addBreak = {
-        type = "execute", order = 1.1, width = 0.7, name = "Add line break",
-        desc = "Displays you add after it start a new line. Move it up or down to split lines elsewhere.",
+        type = "execute", order = 1.1, width = 0.7,
+        name = function() return ("Add %s break"):format(RowWord(group)) end,
+        desc = function()
+          return ("Displays you add after it start a new %s. Move it up or down to split %s elsewhere.")
+              :format(RowWord(group), RowWord(group, true))
+        end,
         func = function() AddLineBreak(group) end,
       },
       testGroup = {
@@ -1956,7 +1995,7 @@ local function GroupOptions(group, index)
     return ns.FirstLineConflict(group) and ALERT .. " " .. name or name
   end
   local function TreeDesc()
-    return ns.FirstLineConflict(group) and FIRST_LINE_TITLE .. "." or nil
+    return ns.FirstLineConflict(group) and FirstLineTitle(group) .. "." or nil
   end
   return { type = "group", order = 10 + index, name = TreeName, desc = TreeDesc, args = args }
 end

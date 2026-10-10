@@ -455,7 +455,7 @@ local function LineHeight(line, group)
   return size + group.lineSpacing
 end
 
--- Why "Show only the first line" can't work with the group's icon sizes, or
+-- Why "Show only the first row" can't work with the group's icon sizes, or
 -- nil. Its window (Chain.StyleFirstLine) is one line of the biggest icon deep,
 -- and Lua can't tell which line is on top. A line of smaller icons on top leaves
 -- room for the edge of any line after it, so only the last line may be

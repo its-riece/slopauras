@@ -95,6 +95,11 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
 
 ## How a group becomes frames
 
+Wording: the editor calls a line a **row**, or a **column** when icons grow up or down
+(`RowWord` in Options.lua), and a line break a row or column break, because players found it
+clearer than "line". In the code, "line" is a line and "row" is one group on one host, as
+below.
+
 - **Host:** one unit's place on screen (player, target, focus, each party or raid
   frame, members and pets, each nameplate). Every host gets its own copy of each row meant for it.
 - **Row:** one group on one host. **Line:** one AuraContainer with one aura group per list
@@ -108,7 +113,7 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
 - **Centering** (`growth = "CENTER"`, or `"CENTER_VERTICAL"` for a column): Lua can't halve
   a secret width, so each container has a half-size shadow copy. The shadows chain backwards
   from the center (left, or up), and the visible line starts where they end.
-- **Show only the first line** (`firstLine`, per group): the row's containers sit in one clip
+- **Show only the first line** (`firstLine`, per group; the editor's "Show only the first row/column"): the row's containers sit in one clip
   window at the row's origin (`Chain.StyleFirstLine`), one line of the biggest icon deep.
   Empty lines collapse, so it shows the first line that has auras. Only for rows on their
   own (`ns.SingleRow`); lines don't wrap while it's on. A smaller line on top would let the
@@ -193,7 +198,8 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
   Text, Border, Glow) by `Section` at its end; Text holds one `TextBox` each for the timer
   and stacks: a new Appearance control needs a row
   there too, or it won't show. A group's Layout tab (`LayoutTab`) holds the Lines section
-  (`LineControls`: Grow, New lines go, Line spacing, Show only the first line) and Anchor.
+  (`LineControls`: Grow, New rows go, Row spacing, Show only the first row; "column" for
+  vertical growth) and Anchor.
 - AceConfigDialog lays controls out left to right and wraps; numeric widths are multiples
   of 170px; a tab group fills to the panel bottom (nothing can sit below it); a description
   has one font size.
