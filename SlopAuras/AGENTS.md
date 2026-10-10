@@ -114,6 +114,15 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
   own (`ns.SingleRow`); lines don't wrap while it's on. A smaller line on top would let the
   edge of the next one show, so only the last line may be smaller: otherwise
   (`ns.FirstLineConflict`) the window clips nothing and the editor says why.
+- **Priority stacks:** a group showing only its first line, where every line is one list
+  display showing one icon (`ns.StackDisplays`; not centered, not while the first-line
+  window is ignored), is built as one container of aura slots (`Chain.NewStack`,
+  `AddAuraSlot`): one button per display where an aura group makes ten. The slots sit on
+  one spot, earlier displays on top, so it shows what the first-line window would.
+  Whether a group qualifies is part of `BuildFlags`, since the edits that change it (Max
+  icons shown, icon size) are sent as look changes.
+- **Never load** displays aren't built (`SplitLines` leaves them out); turning it on or off
+  is structural.
 - **Wrapping lines** (`wrap` on the display that starts a line): the container's flow layout
   wraps by length (`Chain.SetWrap`), so the next line follows its last row. Only for lines
   without missing displays, in groups not showing only their first line, whose strands are
@@ -131,7 +140,7 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
 - `skin = "masque"` (the default when Masque is loaded) skins a display; the border color
   then goes on the skin's ring and `borderStyle` (Blizzard / Plain) is unused. The flag
   is in the row signature, and `Apply` rebuilds when any display's flag changed
-  (`MasqueFlags`), since the editor sends it as a look change.
+  (`BuildFlags`), since the editor sends it as a look change.
 - One Masque group per SlopAuras group with skinned displays (`SyncSkins`,
   SlopAuras.lua; static ID = group id), passed to `Chain.NewList` / `NewMissing` as
   `skin`. A Masque option change bumps `skinEpoch` (part of `StyleText`) and restyles

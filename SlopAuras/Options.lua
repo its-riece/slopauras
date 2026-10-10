@@ -479,9 +479,12 @@ local function SharedTabs(t, isDisplay, extra)
     end
   end
 
+  -- Never load decides which containers are built (SplitLines in SlopAuras.lua).
+  local STRUCTURAL = { neverLoad = true }
+
   local function Set(key, value)
     t[key] = value
-    Changed(false)
+    Changed(STRUCTURAL[key] == true)
   end
 
   -- `arg` is the one free-form field AceConfig allows on an option;
@@ -491,10 +494,12 @@ local function SharedTabs(t, isDisplay, extra)
       option.arg = {
         reset = function()
           if OwnsAny(key) then
+            local structural = false
             for _, k in ipairs(type(key) == "table" and key or { key }) do
               t[k] = nil
+              structural = structural or STRUCTURAL[k] == true
             end
-            Changed(false)
+            Changed(structural)
             Refresh()
           end
         end,

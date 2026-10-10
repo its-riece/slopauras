@@ -245,14 +245,27 @@ end
 
 local rowConfigs = {}
 
--- Which displays use Masque, as one string. Switching a display to or from
--- "masque" changes its row's signature, but the editor sends that as an
--- ordinary look change, so Apply compares this to catch it.
-local masqueFlags = ""
+-- Whether any of the group's displays loads: Never load (inherited from the
+-- group unless a display overrides it) builds nothing.
+local function Loads(group)
+  for _, display in ns.Displays(group) do
+    if not display.neverLoad then
+      return true
+    end
+  end
+  return false
+end
 
-local function MasqueFlags()
+-- Which displays use Masque and which groups are built as a priority stack
+-- (ns.StackDisplays), as one string. Both change what's built, but the editor
+-- sends them as ordinary look changes (a skin, Max icons shown, an icon size),
+-- so Apply compares this to catch them.
+local buildFlags = ""
+
+local function BuildFlags()
   local flags = {}
   for _, group in ipairs(ns.groups) do
+    flags[#flags + 1] = ns.StackDisplays(group) and "s" or "-"
     for _, display in ns.Displays(group) do
       flags[#flags + 1] = display.skin == "masque" and "1" or "0"
     end
@@ -261,11 +274,11 @@ local function MasqueFlags()
 end
 
 local function ComputeRows()
-  masqueFlags = MasqueFlags()
+  buildFlags = BuildFlags()
   local rows = {}
   for _, group in ipairs(ns.groups) do
     local targets = TargetSet(group.target)
-    if not ClassAllowed(group) or not ns.Displays(group)() then
+    if not ClassAllowed(group) or not Loads(group) then
       -- not loaded on this character
     elseif not targets then
       Warn(("group %s: unknown target in %s"):format(tostring(group.name), tostring(group.target)))
@@ -288,13 +301,16 @@ local function ComputeRows()
       for _, display in ipairs(group.displays) do
         if display.mode == "break" then
           broken = started
-        else
+        elseif not display.neverLoad then
           local newLine = broken and "/" or ""
           started, broken = true, false
           -- Only Masque-style displays' buttons are registered with Masque.
           local masque = display.skin == "masque" and "+masque" or ""
           table.insert(parts, newLine .. display.mode .. masque)
         end
+      end
+      if ns.StackDisplays(group) then
+        table.insert(parts, "stack")
       end
       table.insert(rows, {
         group = group, targets = targets, lines = lines, signature = table.concat(parts, "|"),
@@ -382,12 +398,15 @@ end
 -- Splits a group's displays into lines at its line breaks. A break before the
 -- first display, after the last or right after another makes no line.
 -- Missing-icon displays have their own frames and sit after the line's list
--- displays. `j` is the display's number (ns.Displays).
+-- displays. `j` is the display's number (ns.Displays). Displays set to Never
+-- load are left out: nothing is built for them.
 local function SplitLines(group)
   local lines, line, broken, j = {}, nil, false, 0
   for _, d in ipairs(group.displays) do
     if d.mode == "break" then
       broken = line ~= nil
+    elseif d.neverLoad then
+      j = j + 1
     else
       if not line or broken then
         line, broken = { listDisplays = {}, missingDisplays = {} }, false
@@ -472,6 +491,27 @@ function ns.FirstLineConflict(group)
   return nil
 end
 
+-- The displays of a group that's built as a priority stack (Chain.NewStack),
+-- or nil. That's a group showing only its first line where every line is one
+-- list display showing one icon: the same result with one button per display
+-- instead of ten. Not for centered growth (the stack has no length to
+-- center), or while the first-line window can't work (ns.FirstLineConflict).
+function ns.StackDisplays(group)
+  if not group.firstLine or not ns.SingleRow(group) or group.growth == "CENTER"
+      or group.growth == "CENTER_VERTICAL" or ns.FirstLineConflict(group) then
+    return nil
+  end
+  local displays = {}
+  for _, line in ipairs(SplitLines(group)) do
+    local entry = line.listDisplays[1]
+    if #line.missingDisplays > 0 or #line.listDisplays ~= 1 or entry.d.max ~= 1 then
+      return nil
+    end
+    displays[#displays + 1] = entry.d
+  end
+  return #displays > 0 and displays or nil
+end
+
 -- Masque ---------------------------------------------------------------------
 -- One Masque group per SlopAuras group that has Masque-style displays, keyed
 -- by group id, so each group can have its own skin in Masque's options.
@@ -525,8 +565,10 @@ local function StyleFirstLine(row)
     local group = row.group
     local clip = ns.SingleRow(group) and not ns.FirstLineConflict(group)
     local displays = {}
-    for n, display in ns.Displays(group) do
-      displays[n] = display
+    for _, display in ns.Displays(group) do
+      if not display.neverLoad then
+        displays[#displays + 1] = display
+      end
     end
     Chain.StyleFirstLine(row.firstLineWindow, row.origin, row.g, displays, group.lineSpacing, clip,
       skins[tostring(group.id)])
@@ -558,6 +600,13 @@ end
 -- Only what's left is built. Containers no line takes are turned off and kept
 -- as spares for later edits, so moving a line break and back builds nothing.
 -- Out of combat.
+-- Whether the game shows placeholder auras (Edit Mode or test mode), from
+-- AURA_DATA_PROVIDER_SWITCH. Containers learn that only from the event, and a
+-- new one starts on real auras (Blizzard_ManagedAuraContainer.lua:95), so
+-- building any while placeholders are on sets `refake`, and UpdateAll calls the
+-- switch again for them.
+local placeholders, refake = false, false
+
 local function AssignLines(row, host)
   local group, lists, missing = row.group, row.spareLists, row.spareMissing
   for _, line in ipairs(row.lines) do
@@ -577,7 +626,17 @@ local function AssignLines(row, host)
     return inst
   end
 
+  local built = false
   row.lines = SplitLines(group)
+  -- A priority stack is one container: its one-display lines become one line.
+  local stack = ns.StackDisplays(group) ~= nil
+  if stack then
+    local merged = { listDisplays = {}, missingDisplays = {} }
+    for k, line in ipairs(row.lines) do
+      merged.listDisplays[k] = line.listDisplays[1]
+    end
+    row.lines = { merged }
+  end
   for i, line in ipairs(row.lines) do
     -- Later lines start at their own 1px origin, anchored by Relink. It may be
     -- anchored to a container, hence the template.
@@ -589,14 +648,18 @@ local function AssignLines(row, host)
     if #line.listDisplays > 0 then
       local displays = ListDisplays(line)
       local function Fits(inst)
-        return inst.skin == skin and Chain.CanResize(inst, displays)
+        return (inst.stack == true) == stack and inst.skin == skin and Chain.CanResize(inst, displays)
       end
       -- Preferably one with enough aura groups already (Resize adds the rest).
       line.list = Take(lists, function(inst) return inst.slots >= #displays and Fits(inst) end)
           or Take(lists, Fits)
       if line.list then
         Chain.Resize(Reuse(line.list), displays, row.g, group.lineSpacing)
+      elseif stack then
+        built = true
+        line.list = Chain.NewStack(row.parent, unit, displays, row.g, name .. " stack", plate, skin)
       else
+        built = true
         line.list = Chain.NewList(row.parent, unit, displays, row.g, group.lineSpacing,
           ("%s line %d"):format(name, i), plate, skin)
         Chain.SetWrap(line.list, LineWrap(group, line))
@@ -608,6 +671,7 @@ local function AssignLines(row, host)
       if inst then
         Chain.SetDisplay(Reuse(inst), entry.d)
       else
+        built = true
         inst = Chain.NewMissing(row.parent, unit, entry.d, row.g, group.lineSpacing,
           ("%s %d"):format(name, entry.j), plate, skin)
       end
@@ -615,6 +679,7 @@ local function AssignLines(row, host)
     end
   end
 
+  refake = refake or placeholders and built
   for _, spares in ipairs({ lists, missing }) do
     for _, inst in ipairs(spares) do
       if inst.active ~= false then
@@ -1108,6 +1173,12 @@ function UpdateAll()
     end
     return -- SyncTesting ran UpdateAll
   end
+  if refake then
+    refake = false
+    if placeholders and not inCombat and not C_Secrets.ShouldAurasBeSecret() then
+      C_UnitAuras.SwitchAuraDataProvider() -- containers already switched ignore it
+    end
+  end
   Batch(function()
     for _, host in ipairs(hosts) do
       UpdateHost(host)
@@ -1165,8 +1236,10 @@ local raidHosts = {} -- raid or raid pet unit frame -> its host
 --   flat list: CompactRaidFrame1, 2, ... These also show pets and main tank
 --              targets; frameType tells them apart. Pets are flat in both
 --              layouts (AddPets). Each frameType has its own frame pool
---              (frameReservations), so a frame keeps its kind.
-local FLAT_KINDS = { raid = "raid", flagged = "raid", pet = "raidpet" }
+--              (frameReservations), so a frame keeps its kind. "raidFake"
+--              frames are Edit Mode's raid preview (unit "player" or a party
+--              member), so raid groups can be previewed there.
+local FLAT_KINDS = { raid = "raid", flagged = "raid", raidFake = "raid", pet = "raidpet" }
 
 -- "raid", "raidpet", or nil for anything else. The CompactUnitFrame_SetUnit
 -- hook also sees forbidden nameplate frames (friendly plates in instances);
@@ -1191,6 +1264,38 @@ local function AddRaidHost(frame, kind)
   if not raidHosts[frame] then
     raidHosts[frame] = NewHost(kind, frame.unit, frame)
     UpdateHost(raidHosts[frame])
+  end
+end
+
+-- Raid frames seen for the first time wait here and get their hosts a few per
+-- frame, within a time budget. A host builds every raid group's rows (each aura
+-- group makes 10 buttons up front), and joining a raid or opening Edit Mode's
+-- raid preview hands out up to 40 frames at once: built together, the game
+-- froze. Containers can't be built while auras are secret, so it waits then.
+local BUILD_BUDGET_MS = 4
+local raidQueue, queued = {}, {}
+local builder = CreateFrame("Frame")
+builder:Hide()
+builder:SetScript("OnUpdate", function(self)
+  if C_Secrets.ShouldAurasBeSecret() then
+    return
+  end
+  local start = debugprofilestop()
+  repeat
+    local entry = table.remove(raidQueue, 1)
+    queued[entry.frame] = nil
+    AddRaidHost(entry.frame, entry.kind)
+  until #raidQueue == 0 or debugprofilestop() - start > BUILD_BUDGET_MS
+  if #raidQueue == 0 then
+    self:Hide()
+  end
+end)
+
+local function QueueRaidHost(frame, kind)
+  if not queued[frame] and not raidHosts[frame] then
+    queued[frame] = true
+    table.insert(raidQueue, { frame = frame, kind = kind })
+    builder:Show()
   end
 end
 
@@ -1224,11 +1329,7 @@ hooksecurefunc("CompactUnitFrame_SetUnit", function(frame, unit)
   elseif built and unit then
     local kind = RaidFrameKind(frame)
     if kind then
-      -- A raid frame we haven't seen. Blizzard only creates them out of
-      -- combat, but give it its host once that's safe either way.
-      WhenSafe(function()
-        AddRaidHost(frame, kind)
-      end)
+      QueueRaidHost(frame, kind)
     end
   end
 end)
@@ -1369,7 +1470,7 @@ local function Apply(structural)
   -- Configure below sends every container its real filters again.
   restoring = restoring and testing
   SyncSkins()
-  if structural or MasqueFlags() ~= masqueFlags then
+  if structural or BuildFlags() ~= buildFlags then
     rowConfigs = ComputeRows()
     for _, host in ipairs(hosts) do
       SyncHost(host)
@@ -1484,6 +1585,7 @@ events:RegisterEvent("GROUP_ROSTER_UPDATE")
 events:RegisterEvent("UNIT_PET")
 events:RegisterEvent("NAME_PLATE_UNIT_ADDED")
 events:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
+events:RegisterEvent("AURA_DATA_PROVIDER_SWITCH")
 if C_EventUtils.IsEventValid("PLAYER_FOCUS_CHANGED") then
   events:RegisterEvent("PLAYER_FOCUS_CHANGED")
 end
@@ -1495,6 +1597,8 @@ events:SetScript("OnEvent", function(_, event, arg)
     end
   elseif event == "NAME_PLATE_UNIT_REMOVED" then
     OnPlateRemoved(arg)
+  elseif event == "AURA_DATA_PROVIDER_SWITCH" then
+    placeholders = not arg -- arg: useRealDataProvider
   elseif event == "ADDON_LOADED" then
     if arg == addonName then
       LoadSettings()

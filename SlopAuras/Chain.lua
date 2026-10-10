@@ -632,6 +632,18 @@ local function StyleDispelBorders(part, d, skinned)
     part.ring[1]:Hide()
     part.ring[2]:Hide()
   end
+  -- Made the first time they're wanted (most displays use one kind or none).
+  if wantedPlain and #part.plainBorders == 0 then
+    for i = 1, #PLAIN_OPTIONS do
+      part.plainBorders[i] = NewStrips(part.overlay, part.button)
+    end
+  end
+  if wanted and #part.borders == 0 then
+    for i = 1, #BORDER_OPTIONS do
+      part.borders[i] = part.overlay:CreateTexture(nil, "OVERLAY")
+      part.borders[i]:SetPoint("CENTER", part.button, "CENTER")
+    end
+  end
   for i, strips in ipairs(part.plainBorders) do
     PlaceStrips(strips, PlainWidth(d))
     if wantedPlain ~= part.plainOn then
@@ -660,20 +672,6 @@ local function StyleDispelBorders(part, d, skinned)
   end
   part.borderOn = wanted
   return ok
-end
-
--- Border textures for StyleDispelBorders, on `parent` around `button`.
-local function NewDispelBorders(parent, button)
-  local borders = {}
-  for i = 1, #BORDER_OPTIONS do
-    borders[i] = parent:CreateTexture(nil, "OVERLAY")
-    borders[i]:SetPoint("CENTER", button, "CENTER")
-  end
-  local plainBorders = {}
-  for i = 1, #PLAIN_OPTIONS do
-    plainBorders[i] = NewStrips(parent, button)
-  end
-  return borders, plainBorders
 end
 
 -- Every display key StyleButton reads, as one string: Configure restyles a
@@ -773,12 +771,25 @@ local function StyleButton(part, d)
   ok = pcall(part.button.SetMouseMotionEnabled, part.button, d.tooltip ~= "never") and ok
   ok = pcall(part.button.SetHideTooltipInCombat, part.button, d.tooltip == "out") and ok
   ok = StyleDispelBorders(part, d, skin ~= nil) and ok
-  StyleCustomBorder(part.customBorder, d, skin and part.ring)
+  if CustomBorder(d) and not part.customBorder then
+    part.customBorder = NewCustomBorder(part.overlay, part.button)
+  end
+  if part.customBorder then
+    StyleCustomBorder(part.customBorder, d, skin and part.ring)
+  elseif part.ring then
+    part.ring.custom:Hide()
+  end
 
   -- Addon code can't animate inside an aura button, so the glow is handed to
   -- the button and Blizzard plays it whenever the button shows an aura
   -- (ApplyVisibility, Blizzard_CustomAuraButton.lua). Registered, its
   -- animation can't change, but it can be removed and added again.
+  if d.glow and not part.glow then
+    part.glow, part.glowAnim = NewGlow(part.button)
+  end
+  if not part.glow then
+    return ok
+  end
   ok = StyleGlow(part.glow, d, skin) and ok
   local glow = d.glow and true or false
   if glow ~= part.glowOn then
@@ -831,10 +842,6 @@ local function StyledButton(inst, j, parts)
     count:SetPoint("BOTTOMRIGHT", -1, 1)
     button:SetApplicationCount(count)
 
-    local borders, plainBorders = NewDispelBorders(overlay, button)
-    local customBorder = NewCustomBorder(overlay, button)
-    local glow, glowAnim = NewGlow(button)
-
     -- Masque-style displays only. Registered even while the Masque group is
     -- disabled, so enabling it later skins this button too. Masque draws its
     -- frame art (Normal) on the button, under the cooldown swipe and our
@@ -846,10 +853,12 @@ local function StyledButton(inst, j, parts)
         { Icon = icon, Cooldown = cooldown, Count = count, Border = ring[1] }, "Aura", true)
     end
 
+    -- Borders, the custom border and the glow are made by StyleButton when the
+    -- display first uses them: creating every kind for every button made
+    -- building slow (each aura group makes ten buttons).
     local part = {
-      button = button, icon = icon, cooldown = cooldown, count = count, borders = borders, borderOn = false,
-      customBorder = customBorder, plainBorders = plainBorders, plainOn = false, ring = ring, ringOn = false,
-      glow = glow, glowAnim = glowAnim, glowOn = false, inst = inst,
+      button = button, icon = icon, cooldown = cooldown, count = count, overlay = overlay, borders = {},
+      borderOn = false, plainBorders = {}, plainOn = false, ring = ring, ringOn = false, glowOn = false, inst = inst,
     }
     table.insert(parts, part)
     local d = inst.displays[j]
@@ -1060,6 +1069,56 @@ function Chain.NewList(parent, unit, displays, g, lineSpacing, label, plate, ski
   return inst
 end
 
+-- A priority stack: for a row that shows only its first line, where every
+-- line is one display showing one icon (SlopAuras.lua decides). Each display
+-- is an aura slot, one button (AddAuraSlot) where an aura group makes ten
+-- (Blizzard_CustomAuraContainer.lua). Slots take no part in layout, so they
+-- all sit on the container's start corner, earlier displays on top: the
+-- first display with an aura is the one seen, as the first-line window shows
+-- it. The container itself stays 1px and only marks the spot.
+local SLOT_LEVELS = 4 -- a button's own levels: itself, cooldown, overlay, and one spare
+
+local function AddSlot(inst, j, d)
+  inst.parts[j] = {}
+  inst.masque[j] = UsesMasque(inst, d)
+  local key = Key(j)
+  local sortMethod = AuraContainerSortMethod[d.sort] or AuraContainerSortMethod.Default
+  local sortDirection = d.sortReverse and AuraContainerSortDirection.Reverse or AuraContainerSortDirection.Normal
+  local candidates = GroupCandidates(d, false)
+  inst.main:AddAuraSlot(key, FilterFor(inst, d), {
+    candidateFilters = candidates, sortMethod = sortMethod, sortDirection = sortDirection,
+    initializeFrame = StyledButton(inst, j, inst.parts[j]),
+  })
+  local frame = inst.main:GetAuraSlotFrame(key)
+  pcall(frame.SetPoint, frame, inst.g.start, inst.main, inst.g.start)
+  local last = Sent(inst, inst.main, j)
+  last.candidatesSent, last.candidates = true, candidates
+  last.sortMethod, last.sortDirection = sortMethod, sortDirection
+end
+
+-- Display 1 on top. Children keep their offset when a frame's level changes.
+local function LevelSlots(inst)
+  local base, count = inst.main:GetFrameLevel() + 1, inst.slots
+  for j = 1, count do
+    local frame = inst.main:GetAuraSlotFrame(Key(j))
+    pcall(frame.SetFrameLevel, frame, base + (count - j) * SLOT_LEVELS)
+  end
+end
+
+function Chain.NewStack(parent, unit, displays, g, label, plate, skin)
+  local inst = {
+    stack = true, g = g, displays = displays, parts = {}, on = {}, inRange = true, plate = plate, skin = skin,
+    slots = #displays, masque = {}, unit = unit,
+  }
+  inst.main = NewContainer(parent, unit, g)
+  Name(inst.main, label)
+  for j, d in ipairs(displays) do
+    AddSlot(inst, j, d)
+  end
+  LevelSlots(inst)
+  return inst
+end
+
 -- Whether list line `inst` can take `displays` through Chain.Resize. A slot's
 -- Masque registration is fixed when its buttons are made, so each display
 -- landing on an existing slot must match it.
@@ -1085,14 +1144,21 @@ function Chain.Resize(inst, displays, g, lineSpacing)
   end
   for j = inst.slots + 1, #displays do
     local d = displays[j]
-    inst.parts[j] = {}
-    inst.masque[j] = UsesMasque(inst, d)
-    AddGroup(inst, inst.main, j, d, GroupOptions(d, g, lineSpacing, false, nil, StyledButton(inst, j, inst.parts[j])))
-    if inst.shadow then
-      AddGroup(inst, inst.shadow, j, d, GroupOptions(d, g.shadow, lineSpacing, true))
+    if inst.stack then
+      AddSlot(inst, j, d)
+    else
+      inst.parts[j] = {}
+      inst.masque[j] = UsesMasque(inst, d)
+      AddGroup(inst, inst.main, j, d, GroupOptions(d, g, lineSpacing, false, nil, StyledButton(inst, j, inst.parts[j])))
+      if inst.shadow then
+        AddGroup(inst, inst.shadow, j, d, GroupOptions(d, g.shadow, lineSpacing, true))
+      end
     end
   end
   inst.slots = math.max(inst.slots, #displays)
+  if inst.stack then
+    LevelSlots(inst)
+  end
   -- inst.on[j] is slot j's state, which UpdateLine compares against. A new
   -- aura group starts on with no state, so UpdateLine sets it either way.
   for j = #displays + 1, inst.slots do
@@ -1188,13 +1254,38 @@ local function Reconfigure(container, inst, optionsFor)
   end
 end
 
+-- Reconfigure for a stack's slots: filter, candidate filters and sort. Slots
+-- have no max or layout.
+local function ReconfigureSlots(inst)
+  local container = inst.main
+  for j, d in ipairs(inst.displays) do
+    local key, last = Key(j), Sent(inst, container, j)
+    container:SetAuraSlotFilterString(key, FilterFor(inst, d))
+    local candidates = GroupCandidates(d, false)
+    if not last.candidatesSent or last.candidates ~= candidates then
+      container:SetAuraSlotCandidateFilters(key, candidates)
+      last.candidatesSent, last.candidates = true, candidates
+    end
+    local sortMethod = AuraContainerSortMethod[d.sort] or AuraContainerSortMethod.Default
+    local sortDirection = d.sortReverse and AuraContainerSortDirection.Reverse or AuraContainerSortDirection.Normal
+    if last.sortMethod ~= sortMethod or last.sortDirection ~= sortDirection then
+      container:SetAuraSlotSortMethod(key, sortMethod, sortDirection)
+      last.sortMethod, last.sortDirection = sortMethod, sortDirection
+    end
+  end
+end
+
 -- Applies the current settings to existing containers and buttons, for the
 -- editor. Out of combat only: containers refuse while auras are secret.
 -- Changing mode, growth, line direction or line breaks needs a new line.
 -- Returns false if Blizzard refused part of the restyle.
 function Chain.Configure(inst, g, lineSpacing)
   local maxCount = inst.window and 1 or nil
-  Reconfigure(inst.main, inst, function(d) return GroupOptions(d, g, lineSpacing, false, maxCount) end)
+  if inst.stack then
+    ReconfigureSlots(inst)
+  else
+    Reconfigure(inst.main, inst, function(d) return GroupOptions(d, g, lineSpacing, false, maxCount) end)
+  end
   if inst.shadow then
     Reconfigure(inst.shadow, inst, function(d) return GroupOptions(d, g.shadow, lineSpacing, true, maxCount) end)
   end
@@ -1282,7 +1373,9 @@ function Chain.SetRange(inst, inRange)
   end
   for j, d in ipairs(inst.displays) do
     for _, part in ipairs(inst.parts[j]) do
-      ApplyRange(part.glow, d, inRange)
+      if part.glow then
+        ApplyRange(part.glow, d, inRange)
+      end
     end
   end
 end
@@ -1300,7 +1393,9 @@ function Chain.UpdateCombatGlows(inst)
   for j, d in ipairs(inst.displays) do
     if d.glowCombat == "in" or d.glowCombat == "out" then
       for _, part in ipairs(inst.parts[j]) do
-        ShowGlow(part.glow, part.glowAnim, part.glowOn and GlowNow(d))
+        if part.glow then
+          ShowGlow(part.glow, part.glowAnim, part.glowOn and GlowNow(d))
+        end
       end
     end
   end
@@ -1309,6 +1404,10 @@ end
 -- Turns one display's aura group on or off within its line. The flow layout
 -- closes the gap. Works in combat.
 function Chain.SetDisplayActive(inst, j, active)
+  if inst.stack then
+    pcall(inst.main.SetAuraSlotEnabled, inst.main, Key(j), active)
+    return
+  end
   pcall(inst.main.SetAuraGroupEnabled, inst.main, Key(j), active)
   if inst.shadow then
     pcall(inst.shadow.SetAuraGroupEnabled, inst.shadow, Key(j), active)
