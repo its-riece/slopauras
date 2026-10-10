@@ -1,6 +1,8 @@
 # Maintaining SlopAuras
 
-For anyone changing SlopAuras' code, agent or person. SlopAuras is an aura tracker for
+For anyone changing SlopAuras' code, agent or person, and for anyone helping a player set it
+up: "Walking a player through the editor" and "Import / export" cover that. SlopAuras is an
+aura tracker for
 World of Warcraft: Forever, a Classic-based client (game type `camelot`) with
 Midnight-style secret values. It draws rows of aura icons on any frame. It builds them from
 Blizzard's AuraContainers, so it keeps working while aura data is secret.
@@ -20,22 +22,34 @@ Load order is the `.toc` order.
 
 ## Platform rules that shape the code
 
-The game enforces secret values. In combat, aura data, counts, spell IDs and durations are
-secret, and addon Lua can't read or compare them. Check an API's `SecretWhen*` / `SecretReturns`
-tags in `Blizzard_APIDocumentationGenerated` before relying on it.
+The game enforces secret values. While `C_Secrets.ShouldAurasBeSecret()` is true, aura data,
+counts, spell IDs and durations are secret, and addon Lua can't read or compare them. That is
+any combat, and the whole of a PvP match (battleground), in and out of combat. Secret is not
+the same as combat: `PLAYER_REGEN_ENABLED` and `InCombatLockdown()` don't say whether auras
+are secret; ask `ShouldAurasBeSecret()` (it changes with `ADDON_RESTRICTION_STATE_CHANGED`).
+Check an API's `SecretWhen*` / `SecretReturns` tags in `Blizzard_APIDocumentationGenerated`
+before relying on it.
 
 - **Never read auras.** Matching, counting, sorting and layout all happen inside Blizzard's
   `CustomAuraContainerTemplate` (Blizzard_AuraContainer). SlopAuras only configures
   containers (filter string, candidate filters, sort, max, layout) and anchors frames to
   their geometry. Presence and counts show up as container *size*, never as values.
-- **Containers refuse changes while auras are secret** (`C_Secrets.ShouldAurasBeSecret()`,
-  i.e. combat). Building and restyling go through `WhenSafe` and wait for
-  `PLAYER_REGEN_ENABLED`; the editor locks until then (`ns.Locked`).
+- **While auras are secret, existing buttons can't be touched, but new rows can be built.**
+  After `initializeFrame`, every call on an aura button or anything under it (icon,
+  cooldown, count, our overlay) raises "forbidden object" (`DenyTaintedAccessWhenAurasAreSecret`,
+  Blizzard_AuraContainerFrameProviders.lua:77-86). Building fresh containers works, under
+  combat lockdown too, with each button styled in `initializeFrame`. So nothing waits for
+  secrecy to end: while secret, `Apply` rebuilds changed rows instead of restyling them
+  (`SyncHost` keeps rows whose `fingerprint` matches; the `syncer` frame builds a few hosts
+  per frame within `BUILD_BUDGET_MS`) and `ConfigureHost` skips `Chain.Configure`. The
+  editor never locks; only test mode does (`ns.TestLocked`). Glows that follow combat or
+  range can't flip on built buttons: combat glows are two copies with combat loads
+  (`GlowCopies`), and range glows show fully while secret (`Chain.HoldRange`).
 - **Frames anchored to a container** (or to anything inside one) need
   `DisableUntrustedLayoutScriptsTemplate`, or the game refuses the anchor.
 - **You can only set up a button in `initializeFrame`.** Register its regions there
   (`SetIcon`, `SetDurationCooldown`, `SetApplicationCount`, `AddDispelTypeTexture`);
-  Blizzard fills them from secret data. Out of combat you can change size, tint and the
+  Blizzard fills them from secret data. While auras aren't secret you can change size, tint and the
   like later, through the parts kept per button (`StyledButton`, `StyleButton`).
 - **Animations inside buttons** go through `AddAuraShownAnimation`; Blizzard plays them
   when the button shows. A registered texture's alpha, vertex color and tex
@@ -71,7 +85,7 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
   testing list displays get no candidate filters and missing displays get one nothing passes
   (`Chain.SetTestFilters`), so every display fills and missing icons show. Putting the real
   filters back is a container change, so displays that were changed stay hidden
-  (`restoring`) until the next `Apply`, which waits out combat.
+  (`restoring`) until the next `Apply`.
 
 ## Data model
 
@@ -86,7 +100,8 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
   saves only raw values. Read a display's own value with `rawget` when inheritance would
   give the wrong answer (`name`, the editor's asterisks).
 - **"Off" overrides:** a display that must drop a group value saves an explicit off value
-  (`false` for `tint`, `glow`, `borderColor`; `"always"` for `combat`, `glowCombat`;
+  (`false` for `tint`, `glow`, `borderColor`, `dispelBorder`, `glowInRange`, `timerFont`,
+  `stackFont`; `"always"` for `combat`, `glowCombat`;
   `"never"` for `tooltip`;
   `"auto"` for `hideWhenNotVisible`; `"any"` for `resting`, `mounted`; `"enemy"` for
   `nameplateUnits`; `"blizzard"` for `borderStyle`).
@@ -166,7 +181,7 @@ below.
 ## Applying changes
 
 - The editor writes into the saved tables and calls `ns.Changed(structural)`; changes apply
-  0.1s later, out of combat (`Apply`).
+  0.1s later (`Apply`), in combat too (see "While auras are secret" above).
 - Each row has a **signature** (`ComputeRows`): group identity, growth, lines, cap, and each
   display's mode and line break. SlopAuras updates rows in place (`Chain.Configure`) and
   rebuilds only what it must. A row whose signature changed but whose **shape** didn't (group
@@ -192,41 +207,107 @@ below.
 - Options.lua rebuilds its AceConfig options table from `ns.groups` on every redraw.
   Per-page UI state (open import boxes, pickers) lives in upvalues keyed by page.
 - Tree: groups only, in name order (`SortedGroups`; their order in `ns.groups` does
-  nothing outside the editor). Above a group's tabs: Name, Units (a multiselect dropdown)
-  and the group buttons: Test group, Duplicate, Export, Delete. Tabs: "Displays" has Add
-  display / Add line break / Import display above a second tree of the group's displays and
-  line breaks (a tab's own options draw above its tree); Layout (group-only); "Shared settings" has its own tabs, the Appearance
-  and Load conditions every display uses unless it sets its own. Above a display's tabs:
-  its text links (`Link`), then Name and Shows; its Import / export tab also holds Move to group. A node's child groups go either in the tree
-  or in tabs (`childGroups`), never both; AceConfigDialog draws a new tree for a tree group
-  under a tab. Displays are keyed by position (`d1`, `d2`...), so their path is
-  `{ "g<id>", "displays", "d<i>" }`.
+  nothing outside the editor). The pages are laid out in "Walking a player through the
+  editor" below. A node's child groups go either in the tree or in tabs (`childGroups`),
+  never both; AceConfigDialog draws a new tree for a tree group under a tab, which is how
+  the Displays tab gets its own tree (`GroupOptions`; a tab's own options draw above its
+  tree). Tree entries are keyed by list position (`d<i>` displays, `b<i>` line breaks), so a
+  display's path is `{ "g<id>", "displays", "d<i>" }`.
 - Right-click on a control clears a display's own value (`HookWidgets`, `Resettable`).
-- Appearance is built flat in `SharedTabs`, then grouped into sections (Arrangement, Icon,
-  Text, Border, Glow) by `Section` at its end; Text holds one `TextBox` each for the timer
-  and stacks: a new Appearance control needs a row
-  there too, or it won't show. A group's Layout tab (`LayoutTab`) holds the Lines section
-  (`LineControls`: Grow, New rows go, Row spacing, Show only the first row; "column" for
-  vertical growth) and Anchor.
+- `SharedTabs` builds the three tabs a group and a display share: Appearance, Text and Load
+  conditions. Appearance is built flat, then grouped into sections (Arrangement, Icon,
+  Border, Glow) by `Section` at its end: a new Appearance control needs a row there too, or
+  it won't show. Text holds one `TextBox` each for the timer and stacks. A group's Layout
+  tab (`LayoutTab`) holds the Rows/Columns section (`LineControls`) and Anchor.
 - AceConfigDialog lays controls out left to right and wraps; numeric widths are multiples
   of 170px; a tab group fills to the panel bottom (nothing can sit below it); a description
   has one font size.
 - WoW edit boxes double a typed `|`; `CleanFilter` collapses the runs when a filter saves.
 
+## Walking a player through the editor
+
+Use the labels exactly as below; they are what the player sees. The editor says **row**, or
+**column** for a group that grows up or down, where the code says line. `/slop` opens it.
+
+- **Top of the window:** New group, Test mode; Export full config, Import full config,
+  Import a group. The tree on the left lists groups by name.
+- **A group's page**, above its tabs: Name; Units (a dropdown of checkboxes: You, Your
+  target, Your focus, Party members, Party pets, Raid members, Raid pets, Nameplates); Test
+  group, Duplicate, Export, Delete. Tabs: Displays, Layout, Shared settings.
+- **Displays tab:** Add display, Add line break, Import display, then a second tree: the
+  group's displays, numbered, and its line breaks (a gray rule). A line break's page has
+  Move up, Move down and Delete.
+- **A display's page**, above its tabs: Move up, Move down, Duplicate, Delete; Name; Shows
+  (Matching auras, or Icon when none match). Tabs:
+  - **Filters:** Filter, with Pick filters (checkboxes for each token; click again to
+    exclude it); Spell IDs (exact); Spell IDs (all ranks); Maximum aura duration; Dispel
+    types (Magic, Curse, Disease, Poison, Bleed, No type; none ticked shows every type);
+    Icon (only for Icon when none match).
+  - **Appearance**, in sections. Arrangement: Max icons shown, Wrap after (only on a
+    display that starts a row with no Icon when none match in it, in a group with one row
+    per unit and not showing only its first row), Spacing; Sort, Reverse sort. Icon: Size, Zoom, Alpha; Tint
+    (then Tint color); Desaturate, Hide swipe; Tooltips. Border: Skin (only with Masque
+    installed), Border (None, Dispel color, Custom), Border style; Border width; Color.
+    Glow: Glow (None, Gold, Custom), Glow color, and Glow when (In combat, Out of combat,
+    Out of range). Icon when none match hides Max icons shown, Sort, Hide swipe and
+    Tooltips.
+  - **Text** (not for Icon when none match): a Timer box (Hide timer; Format, Increase
+    precision below, Precision; Font, Size, Outline; Position, Alignment; X, Y; Color) and
+    a Stacks box (the same, without the three format controls).
+  - **Load conditions:** a "Your character" box (Classes; Combat state, Resting state,
+    Mounted state; Which nameplates, on nameplate groups only; Only if you know spell;
+    Hide while you're dead, Never load) and a "Hide a unit's icons when" box (Dead,
+    Offline, Out of sight).
+  - **Import / export:** Move to group (with two or more groups), Export this display
+    (with Include the group's values), Import new settings.
+- **Layout tab:** a Rows (or Columns) box: Grow, New rows go, Row spacing, Show only the
+  first row (only for a group with one row per unit: anchored to each unit's own frame, or
+  showing just one of You, Your target, Your focus; `ns.SingleRow`). An Anchor box: Anchor to (Each
+  unit's own frame, Screen, A named frame), Frame name (named frame only), Group's point,
+  To the frame's, X, Y, Layer.
+- **Shared settings tab:** the same Appearance, Text and Load conditions tabs as a
+  display's, holding the group's values. Every display uses them unless it sets its own.
+  On a display, an asterisk after a label marks its own value; right-clicking the control
+  goes back to the group's.
+
 ## Import / export (Share.lua)
 
 - `SlopAuras:<VERSION>:<kind>:<json>`, kind `config`, `group` or `display`. `VERSION` is the
-  string format version, not the addon version. Bump it only for incompatible changes.
-- JSON is the saved table with two changes: spell ID sets become lists (excluded IDs as
-  `"!id"` strings) and the anchor becomes named fields. `knownSpell` negatives travel as
-  `"!id"`. Parsing uses `C_EncodingUtil`, so nothing pasted runs as code.
+  string format version (now `1`), not the addon version. Bump it only for incompatible
+  changes. Where each kind is pasted: `config` in Import full config (then Replace all my
+  groups, or Add as new groups), `group` in Import a group, `display` in a group's Import
+  display (added at the end) or a display's Import new settings (replaces it).
 - Import is strict: every key must be in the spec tables (`SHARED`, `DISPLAY_ONLY`,
-  `GROUP_ONLY`), Share.lua checks every value, and nothing changes until the whole string
-  passes.
-- Writing a config for a player: those spec tables are the authority for keys, ranges and
-  values; start from the player's own export (the editor's Export buttons) and change
-  only what was asked. Filter tokens and sort methods are Blizzard's (`AuraUtil.AuraFilters`,
-  `AuraContainerSortMethod`), and the platform rules above decide what can match.
+  `GROUP_ONLY`), Share.lua checks every value and range, and nothing changes until the
+  whole string passes. Parsing uses `C_EncodingUtil`, so nothing pasted runs as code.
+- JSON is the saved table (see "Saved keys") with these differences:
+  - A config is `{ "groups": [ ... ] }`. Group names must be unique.
+  - No `id`: the importer assigns one. A group needs `name`.
+  - `target` and `class` are lists: `"target": ["party", "raid"]`.
+  - `anchor` is `{ "point", "relativePoint", "x", "y" }`, plus `"frame"` (a global frame
+    name) only with `"anchorTo": "frame"`. Points: `TOPLEFT`, `TOP`, `TOPRIGHT`, `LEFT`,
+    `CENTER`, `RIGHT`, `BOTTOMLEFT`, `BOTTOM`, `BOTTOMRIGHT`.
+  - `spellIDs` and `rankSpellIDs` are lists of IDs, an excluded one as `"!12345"`.
+    `knownSpell` is one ID or a list, `"!588"` for "must not know".
+  - Colors are `[r, g, b]`, each 0 to 1.
+  - A line break is `{ "mode": "break" }` in a group's `displays`, with no other keys. A
+    display string can't be one.
+- Values Share.lua checks against game tables, listed here for anyone without the source:
+  - `filter`: tokens joined with `|`, `!` before one excludes it. Every filter needs
+    `HELPFUL` or `HARMFUL`. Tokens (`AuraUtil.AuraFilters`): `HELPFUL`, `HARMFUL`,
+    `PLAYER`, `RAID`, `CANCELABLE`, `INCLUDE_NAME_PLATE_ONLY`, `MAW`, `EXTERNAL_DEFENSIVE`,
+    `CROWD_CONTROL`, `RAID_IN_COMBAT`, `RAID_PLAYER_DISPELLABLE`, `BIG_DEFENSIVE`,
+    `IMPORTANT`, `DISPELLABLE`.
+  - `sort` (`AuraContainerSortMethod`): `Default`, `BigDefensive`, `UnitFrameDebuff`,
+    `ImportantOnly`, `Expiration`, `ExpirationOnly`, `Name`, `NameOnly`,
+    `AuraInstanceIDOnly`.
+  - `class`: class tokens (`CLASS_SORT_ORDER`): `WARRIOR`, `PRIEST`, `MAGE` and so on.
+  - `dispelTypes`: `Magic`, `Curse`, `Disease`, `Poison`, `Bleed`, `None` (typeless).
+- Writing a config for a player: start from the player's own export (the editor's Export
+  buttons) and change only what was asked. Leave out keys that would equal the default
+  (`DEFAULTS` in SlopAuras.lua) or the group's value. The platform rules above decide what
+  can match: spell ID lists only work for buffs on friendly units and debuffs on enemies,
+  and auras matching two displays show twice.
 - Giving a player a string: put the whole string in your reply, in a code block, however
   long, so they can copy it.
 
@@ -258,10 +339,13 @@ export strings that import accepts. A group's `lineMax` (older saves and strings
 converted on load and import by `ns.ConvertLineMax`, and a display's `newLine` becomes a
 line break before it (`ns.ConvertNewLine`; a single display's string just drops it).
 
-Group only: `id`, `name`, `target`, `anchorTo`, `anchor` (`{ point, frameName, relativePoint,
-x, y }`), `growth`, `lines`, `lineSpacing`, `firstLine` (`true`: show only the first
-line that has auras), `layer` (draw order among groups on
-one frame, `PlaceOrigin`), `displays`.
+Group only: `id` (saved only, never in strings), `name`, `target` (one or a list of `player`,
+`target`, `focus`, `party`, `partypet`, `raid`, `raidpet`, `nameplate`), `anchorTo` (`unit`,
+`screen`, `frame`), `anchor` (saved `{ point, frameName, relativePoint, x, y }`; x and y
+-2000 to 2000), `growth` (`RIGHT`, `LEFT`, `DOWN`, `UP`, `CENTER`, `CENTER_VERTICAL`),
+`lines` (where new lines go: `UP` or `DOWN` for sideways growth, `LEFT` or `RIGHT` for up or
+down), `lineSpacing`, `firstLine` (`true`: show only the first line that has auras),
+`layer` (1-10, draw order among groups on one frame, `PlaceOrigin`), `displays`.
 
 ## Adding a setting
 
