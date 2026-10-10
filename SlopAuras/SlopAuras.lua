@@ -909,6 +909,60 @@ local function ReadState(host)
   end
 end
 
+-- Test mode: the game's placeholder auras (the ones Edit Mode shows) fill the
+-- containers. That's one global switch with no restrictions
+-- (UnitAuraDocumentation.lua), so Blizzard's aura frames fill too and it
+-- can't be limited to some containers; untested groups are hidden instead.
+-- Test mode runs while the editor's test window is open (ns.SetTestOpen) and at
+-- least one group is ticked. Never in combat: UpdateAll ends it when combat
+-- starts, or whenever the poll finds combat.
+local testOpen, testing = false, false
+local testGroups = {} -- group table -> true; kept until /reload
+-- Test filters (Chain.SetTestFilters) are container changes, so after testing
+-- they stay until Apply can put the real ones back, which waits out combat.
+-- Until then the displays they changed are hidden: with no candidate filters
+-- they'd show auras they shouldn't.
+local restoring = false
+
+function ns.IsTested(group)
+  return testGroups[group] == true
+end
+
+local UpdateAll
+
+local function SyncTesting()
+  for group in pairs(testGroups) do
+    if not tContains(ns.groups, group) then
+      testGroups[group] = nil -- deleted
+    end
+  end
+  local want = testOpen and next(testGroups) ~= nil and not ns.Locked()
+  if want ~= testing then
+    testing = want
+    Chain.SetTestFilters(want)
+    restoring = not want
+    if want then
+      C_UnitAuras.SwitchAuraDataProvider()
+    else
+      C_UnitAuras.ResetAuraDataProvider()
+    end
+    ns.Changed(false) -- sends the containers their filters
+  end
+  UpdateAll()
+end
+
+function ns.SetTested(group, on)
+  testGroups[group] = on or nil
+  SyncTesting()
+end
+
+function ns.SetTestOpen(open)
+  if open ~= testOpen then
+    testOpen = open
+    SyncTesting()
+  end
+end
+
 -- A three-way key: true = only while, false = only while not, nil or "any"
 -- (a display overriding its group) = either.
 local function Wants(want, actual)
@@ -919,8 +973,9 @@ local function Shows(d)
   if not state.shown or not ClassAllowed(d) then
     return false
   end
-  -- d.nameplateUnits: "enemy", "friendly" or "all".
-  if state.plate and (d.nameplateUnits == "enemy" and not state.hostile
+  -- d.nameplateUnits: "enemy", "friendly" or "all". Test mode shows on any
+  -- plate, since in town most plates are friendly.
+  if state.plate and not testing and (d.nameplateUnits == "enemy" and not state.hostile
         or d.nameplateUnits == "friendly" and state.hostile) then
     return false
   end
@@ -970,14 +1025,15 @@ end
 
 -- A list display hiding or showing turns its aura group off or on; the line's
 -- container closes the gap itself. Only a whole line container or a missing
--- display appearing or disappearing needs a relink.
-local function UpdateLine(line)
+-- display appearing or disappearing needs a relink. `off`: hide every display
+-- (a group left out of test mode).
+local function UpdateLine(line, off)
   local changed = false
   local list = line.list
   if list then
     local any = false
     for j, d in ipairs(list.displays) do
-      local on = Shows(d)
+      local on = not off and not (restoring and Chain.TestFaked(d, false)) and Shows(d)
       any = any or on
       if on ~= list.on[j] then
         list.on[j] = on
@@ -991,7 +1047,7 @@ local function UpdateLine(line)
     end
   end
   for _, inst in ipairs(line.missing) do
-    local on = Shows(inst.display)
+    local on = not off and not restoring and Shows(inst.display)
     if on ~= inst.active then
       inst.active = on
       Chain.SetActive(inst, on)
@@ -1006,8 +1062,9 @@ local function UpdateHost(host, relink)
   ReadState(host)
   for _, row in ipairs(host.rows) do
     local changed, showing = relink, false
+    local off = testing and not testGroups[row.group]
     for _, line in ipairs(row.lines) do
-      changed = UpdateLine(line) or changed
+      changed = UpdateLine(line, off) or changed
       showing = showing or (line.list and line.list.active) or false
       for _, inst in ipairs(line.missing) do
         showing = showing or inst.active
@@ -1042,7 +1099,15 @@ local function RefreshHost(host)
   UpdateHost(host)
 end
 
-local function UpdateAll()
+function UpdateAll()
+  if testOpen and (inCombat or UnitAffectingCombat("player") or C_Secrets.ShouldAurasBeSecret()) then
+    testOpen = false
+    SyncTesting()
+    if ns.OnTestEnded then
+      ns.OnTestEnded() -- closes the test window
+    end
+    return -- SyncTesting ran UpdateAll
+  end
   Batch(function()
     for _, host in ipairs(hosts) do
       UpdateHost(host)
@@ -1301,6 +1366,8 @@ end
 -- Rebuilds rows whose structure changed, then pushes every setting to the
 -- containers that stay.
 local function Apply(structural)
+  -- Configure below sends every container its real filters again.
+  restoring = restoring and testing
   SyncSkins()
   if structural or MasqueFlags() ~= masqueFlags then
     rowConfigs = ComputeRows()

@@ -83,6 +83,7 @@ local HAS_MASQUE = LibStub("Masque", true) ~= nil
 -- Refresh the panel, e.g. after the tree changed.
 local function Refresh()
   AceConfigRegistry:NotifyChange(addonName)
+  AceConfigRegistry:NotifyChange(addonName .. " test mode") -- group names and the list
 end
 
 local function Changed(structural)
@@ -1874,18 +1875,26 @@ local function GroupOptions(group, index)
     type = "group", inline = true, order = 0, name = "",
     args = {
       add = {
-        type = "execute", order = 1, width = 0.8, name = "Add display",
+        type = "execute", order = 1, width = 0.7, name = "Add display",
         desc = "The new display lists matching auras. Set its Shows option to \"Icon when none match\" for a missing-aura icon.",
         func = function() AddDisplay(group) end,
       },
       addBreak = {
-        type = "execute", order = 1.1, width = 0.8, name = "Add line break",
+        type = "execute", order = 1.1, width = 0.7, name = "Add line break",
         desc = "Displays you add after it start a new line. Move it up or down to split lines elsewhere.",
         func = function() AddLineBreak(group) end,
       },
+      testGroup = {
+        type = "execute", order = 1.2, width = 0.7, name = "Test group",
+        desc = "Preview this group with sample icons.",
+        func = function() ns.OpenTest(group) end,
+      },
       addBreakRow = Break(1.5),
+      -- The group itself: short labels, as on a display's page, so four fit.
+      up = { type = "execute", order = 2, width = 0.7, name = "Move up", func = function() Move(ns.groups, index, -1) end },
+      down = { type = "execute", order = 2.1, width = 0.7, name = "Move down", func = function() Move(ns.groups, index, 1) end },
       duplicate = {
-        type = "execute", order = 2, width = 0.8, name = "Duplicate group",
+        type = "execute", order = 2.2, width = 0.7, name = "Duplicate",
         desc = "Adds a copy of this group and its displays below it. The copy sits on top of the original until you move it.",
         func = function()
           -- CopyTable copies raw fields only, no metatables; Prepare adds them.
@@ -1899,7 +1908,7 @@ local function GroupOptions(group, index)
         end,
       },
       delete = {
-        type = "execute", order = 3, width = 0.8, name = "Delete group",
+        type = "execute", order = 2.3, width = 0.7, name = "Delete",
         -- A confirm function returning a string sets the prompt (AceConfigDialog).
         confirm = function() return ("Delete %s and its displays?"):format(group.name or ("Group " .. group.id)) end,
         func = function()
@@ -1907,9 +1916,7 @@ local function GroupOptions(group, index)
           Changed(true)
         end,
       },
-      rowBreak = Break(3.5),
-      up = { type = "execute", order = 4, width = 0.8, name = "Move up", func = function() Move(ns.groups, index, -1) end },
-      down = { type = "execute", order = 5, width = 0.8, name = "Move down", func = function() Move(ns.groups, index, 1) end },
+      rowBreak = Break(2.5),
       firstLineWarning = FirstLineWarning(group, 6),
     },
   }
@@ -1995,6 +2002,11 @@ local function Options()
     },
     statusGap = { type = "description", order = 1.5, name = " ", width = "full", hidden = function() return Status() == "" end },
     newGroup = { type = "execute", order = 2, name = "New group", func = NewGroup },
+    testMode = {
+      type = "execute", order = 2.5, name = "Test mode",
+      desc = "Preview your groups with sample icons.",
+      func = function() ns.OpenTest() end,
+    },
     topBreak = Break(3.9),
   }
   AddTopShare(args, 4)
@@ -2112,8 +2124,128 @@ local function CarryTab(tab)
   end
 end
 
+-- Test mode window -------------------------------------------------------------
+-- Its own AceConfigDialog window, apart from the editor, so it stays open when
+-- the editor closes. Test mode runs while it's open (ns.SetTestOpen); closing
+-- it, or combat (ns.OnTestEnded), ends it. Collapsed, it's just an Expand button (the window has its own Close).
+
+local TEST_APP = addonName .. " test mode"
+local testCollapsed = false
+local testOpened = false -- the first opening ticks every group
+-- The window's frame while open. AceGUI pools frames across addons, so the
+-- OnHide hook checks it's still ours.
+local testFrame
+local hookedTest = {}
+
+local function TestWindow()
+  return AceConfigDialog.OpenFrames[TEST_APP]
+end
+
+-- Sized to what it shows. AceConfigDialog applies the size from its status
+-- table on every redraw, so it's set there (SetDefaultSize), not on the frame.
+-- The window's own chrome (title, status bar) takes about 90px; the rest are
+-- rough heights of the intro, a button row, the Groups box and a checkbox.
+local TEST_WIDTH, MAX_HEIGHT = 450, 640
+
+local function SizeTestWindow()
+  local height = 90 + 30
+  if not testCollapsed then
+    height = math.min(height + 50 + 40 + 26 * #ns.groups, MAX_HEIGHT)
+  end
+  AceConfigDialog:SetDefaultSize(TEST_APP, TEST_WIDTH, height)
+end
+
+local function SetCollapsed(collapsed)
+  testCollapsed = collapsed
+  SizeTestWindow()
+  AceConfigRegistry:NotifyChange(TEST_APP)
+end
+
+local function TestOptions()
+  local function Collapsed() return testCollapsed end
+  local function Expanded() return not testCollapsed end
+  local args = {
+    intro = {
+      type = "description", order = 0, width = "full", fontSize = "medium", hidden = Collapsed,
+      name = "Preview how your groups look with sample icons. Closing this window or entering combat ends the preview.",
+    },
+    selectAll = {
+      type = "execute", order = 1, width = 0.8, name = "Select all", hidden = Collapsed,
+      func = function()
+        for _, group in ipairs(ns.groups) do
+          ns.SetTested(group, true)
+        end
+      end,
+    },
+    deselectAll = {
+      type = "execute", order = 2, width = 0.8, name = "Deselect all", hidden = Collapsed,
+      func = function()
+        for _, group in ipairs(ns.groups) do
+          ns.SetTested(group, false)
+        end
+      end,
+    },
+    collapse = {
+      type = "execute", order = 3, width = 0.8, name = "Collapse", hidden = Collapsed,
+      func = function() SetCollapsed(true) end,
+    },
+    expand = {
+      type = "execute", order = 4, width = 0.8, name = "Expand", hidden = Expanded,
+      func = function() SetCollapsed(false) end,
+    },
+    buttonsBreak = Break(5.5),
+  }
+  local groups = {}
+  for i, group in ipairs(ns.groups) do
+    groups["g" .. group.id] = {
+      type = "toggle", order = i, width = "full", name = group.name or ("Group " .. group.id),
+      get = function() return ns.IsTested(group) end,
+      set = function(_, value) ns.SetTested(group, value) end,
+    }
+  end
+  args.groups = { type = "group", inline = true, order = 6, name = "Groups", hidden = Collapsed, args = groups }
+  return { type = "group", name = "Test mode", args = args, disabled = function() return ns.Locked() end }
+end
+
+local function OnTestHide(frame)
+  if frame == testFrame then
+    testFrame = nil
+    ns.SetTestOpen(false)
+  end
+end
+
+-- `only`: a group to test on its own (its "Test group" button); otherwise the
+-- ticks from last time, or every group the first time.
+function ns.OpenTest(only)
+  if ns.Locked() then
+    return
+  end
+  if only or not testOpened then
+    for _, group in ipairs(ns.groups) do
+      ns.SetTested(group, not only or group == only)
+    end
+  end
+  testOpened = true
+  testCollapsed = false
+  SizeTestWindow()
+  AceConfigDialog:Open(TEST_APP)
+  testFrame = TestWindow().frame
+  if not hookedTest[testFrame] then
+    hookedTest[testFrame] = true
+    testFrame:HookScript("OnHide", OnTestHide)
+  end
+  ns.SetTestOpen(true)
+end
+
+function ns.OnTestEnded()
+  if TestWindow() then
+    AceConfigDialog:Close(TEST_APP)
+  end
+end
+
 function ns.InitOptions()
   LibStub("AceConfig-3.0"):RegisterOptionsTable(addonName, Options)
+  LibStub("AceConfig-3.0"):RegisterOptionsTable(TEST_APP, TestOptions)
   AceConfigDialog:AddToBlizOptions(addonName, "SlopAuras")
   AceConfigDialog:SetDefaultSize(addonName, 900, 640)
   hooksecurefunc(AceConfigDialog, "FeedGroup", function(_, appName, _, container, _, path)

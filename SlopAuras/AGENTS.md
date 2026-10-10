@@ -61,6 +61,17 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
 - **Range is secret**: `UnitInRange` feeds `SetAlphaFromBoolean` on the glow.
 - Edit Mode fills every container with placeholder auras (`editModePreviewEnabled` in the
   template). SlopAuras keeps that preview on.
+- **Test mode** flips the same global switch, `C_UnitAuras.SwitchAuraDataProvider` /
+  `ResetAuraDataProvider`, so Blizzard's aura frames fill too. It runs while the test window
+  (its own AceConfigDialog app, Options.lua) is open and at least one group is ticked
+  (`SyncTesting`); untested groups are hidden (`UpdateHost`) and tested nameplate rows show on
+  any plate (`Shows`). It must never stay on in combat: `UpdateAll` ends it and closes the
+  window when combat starts (`PLAYER_REGEN_DISABLED` runs it) and on any poll that finds
+  combat or secret auras. Placeholders have no dispel type, spell ID or duration, so while
+  testing list displays get no candidate filters and missing displays get one nothing passes
+  (`Chain.SetTestFilters`), so every display fills and missing icons show. Putting the real
+  filters back is a container change, so displays that were changed stay hidden
+  (`restoring`) until the next `Apply`, which waits out combat.
 
 ## Data model
 

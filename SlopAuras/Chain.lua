@@ -186,6 +186,32 @@ local function Candidates(d)
   return filters
 end
 
+-- Test mode (SlopAuras.lua) shows the game's placeholder auras
+-- (EditModeAuraDataProvider.lua): no dispel type, spell ID or duration, so
+-- candidate filters would leave most displays empty. While testing, list
+-- displays get none, and a missing display's containers get one nothing
+-- passes, so its icon shows: any maxDuration drops auras without a duration
+-- (DoesAuraPassCandidateFilters, Blizzard_AuraContainerUtil.lua).
+local testFilters = false
+local NOTHING_PASSES = { maxDuration = 1 }
+
+function Chain.SetTestFilters(on)
+  testFilters = on
+end
+
+-- Whether `d`'s containers get other candidate filters while testing.
+-- `missing`: a missing display's.
+function Chain.TestFaked(d, missing)
+  return missing or Candidates(d) ~= nil
+end
+
+local function GroupCandidates(d, missing)
+  if not testFilters then
+    return Candidates(d)
+  end
+  return missing and NOTHING_PASSES or nil
+end
+
 -- Blizzard refuses some anchors to aura containers. Report them instead of erroring.
 function Chain.Anchor(frame, point, relativeTo, relativePoint, x, y)
   local ok, err = pcall(frame.SetPoint, frame, point, relativeTo, relativePoint, x or 0, y or 0)
@@ -839,12 +865,13 @@ end
 -- across groups in one container), so n auras measure n * (slot - 1) + 1: the
 -- 1px an empty container has, plus exactly one slot per aura. Link and the
 -- line stacking cancel that 1px. `half`: a shadow's half-length slots.
+-- `maxCount` is given only for a missing display's containers (one slot).
 local function GroupOptions(d, g, lineSpacing, half, maxCount, init)
   local length = half and (d.size + d.spacing) / 2 + 1 or d.size + d.spacing + 1
   local width, height = Slot(g, length, d.size + lineSpacing + 1)
   return {
     maxFrameCount = maxCount or d.max,
-    candidateFilters = Candidates(d),
+    candidateFilters = GroupCandidates(d, maxCount ~= nil),
     sortMethod = AuraContainerSortMethod[d.sort] or AuraContainerSortMethod.Default,
     sortDirection = d.sortReverse and AuraContainerSortDirection.Reverse or AuraContainerSortDirection.Normal,
     -- lineSpacing: rows a wrapping line starts overlap by 1px too.
