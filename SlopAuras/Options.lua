@@ -1,4 +1,4 @@
--- Options: the in-game editor, in Options -> AddOns -> SlopAuras (or /slop).
+-- Options: the in-game editor, AceConfigDialog's own window (/slop).
 --
 -- Built with AceConfig (Libs/AceConfig-3.0): this file describes the settings
 -- as a table, and AceConfigDialog draws them with WoW-style widgets. The table
@@ -189,6 +189,23 @@ local function GroupByName(name)
   end
 end
 
+-- A group by its options key, "g<id>".
+local function GroupByKey(key)
+  for _, group in ipairs(ns.groups) do
+    if "g" .. group.id == key then
+      return group
+    end
+  end
+end
+
+-- Groups in name order, as the editor lists them. Their order in ns.groups
+-- does nothing outside the editor.
+local function SortedGroups()
+  local list = { unpack(ns.groups) }
+  table.sort(list, function(a, b) return (a.name or ""):lower() < (b.name or ""):lower() end)
+  return list
+end
+
 local function UniqueName(base)
   local name, n = base, 1
   while GroupByName(name) do
@@ -263,9 +280,9 @@ local function FirstLineTitle(group)
   return ("\"Show only the first %s\" doesn't work with these icon sizes"):format(RowWord(group))
 end
 
--- Why "Show only the first row" is ignored (ns.FirstLineConflict), for the
--- top of the group's Settings and of each of its displays, since sizes are
--- usually changed on a display. With two lines, moving the smaller one last
+-- Why "Show only the first row" is ignored (ns.FirstLineConflict), above the
+-- group's tabs, so it also shows over the displays, where sizes are usually
+-- changed. With two lines, moving the smaller one last
 -- fixes it; with more, a line in between would be on top, so it joins the
 -- last line instead.
 local function FirstLineWarning(group, order)
@@ -317,6 +334,46 @@ end
 -- room. A full-width empty description forces a new row.
 local function Break(order)
   return { type = "description", order = order, name = "", width = "full" }
+end
+
+-- Icons for Link as inline escapes, from art this client's own UI uses (the
+-- arrows are the action bar's page buttons, MainActionBar.xml).
+local LINK_ICONS = {
+  up = "|A:ui-hud-actionbar-pageuparrow-up:14:14|a",
+  down = "|A:ui-hud-actionbar-pagedownarrow-up:14:14|a",
+  duplicate = "|TInterface\\Buttons\\UI-PlusButton-Up:14|t",
+  delete = "|TInterface\\Buttons\\UI-GroupLoot-Pass-Up:14|t",
+}
+
+-- A clickable line of text in place of a button, for secondary actions (an
+-- execute drawn by AceGUI's InteractiveLabel). It has no hover highlight, so
+-- an icon and gold text mark it as clickable. The icon is inline: the label only puts its own image beside the
+-- text with 200px to spare, and AceConfigDialog's `image` path calls SetLabel,
+-- which InteractiveLabel lacks. Each link is as wide as its text, measured in
+-- the label's font (GameFontHighlightSmall, AceGUIWidget-Label.lua), plus the
+-- icon and a fixed gap. `extra` adds option fields (confirm).
+local measure
+local function LinkWidth(text)
+  if not measure then
+    measure = UIParent:CreateFontString(nil, "BACKGROUND", "GameFontHighlightSmall")
+    measure:Hide()
+  end
+  measure:SetText(text)
+  return (measure:GetStringWidth() + 14 + 4 + 16) / 170
+end
+
+-- `desc` is required: the tooltip is a link's only response to the mouse, and
+-- without a desc it would just repeat the text.
+local function Link(order, icon, text, desc, func, extra)
+  local option = {
+    type = "execute", order = order, width = LinkWidth(text), dialogControl = "InteractiveLabel",
+    name = ("%s |cffffd100%s|r"):format(LINK_ICONS[icon], text),
+    desc = desc, func = func,
+  }
+  for key, value in pairs(extra or {}) do
+    option[key] = value
+  end
+  return option
 end
 
 -- Filter picker ---------------------------------------------------------------
@@ -454,7 +511,7 @@ local function AddFilterPicker(args, order, key, get, set)
   }
 end
 
--- Returns the Appearance and Load conditions tabs for `t`, a group or a display.
+-- Returns the Appearance, Text and Load conditions tabs for `t`, a group or a display.
 -- `extra`: controls only a display has, placed in the Appearance sections.
 local function SharedTabs(t, isDisplay, extra)
   -- On a display, an asterisk marks the display's own values; unmarked ones
@@ -480,16 +537,14 @@ local function SharedTabs(t, isDisplay, extra)
     end
   end
 
-  -- Tooltip for a control on `key`; on a display, says where the value comes
-  -- from and how to get the group's back.
+  -- Tooltip for a control on `key` (or a list of keys): what it does, plus,
+  -- on a display with its own value, how to get the group's back.
   local function Desc(key, text)
     return function()
-      if not isDisplay then
-        return text
+      if isDisplay and OwnsAny(key) then
+        return text .. "\n\nRight click to reset to group's value."
       end
-      local source = rawget(t, key) == nil and "Uses the group's value. Change it to give this display its own."
-          or "This display's own value. Right-click to use the group's."
-      return text and (source .. "\n\n" .. text) or source
+      return text
     end
   end
 
@@ -522,18 +577,18 @@ local function SharedTabs(t, isDisplay, extra)
     return option
   end
 
-  local function Range(key, order, label, min, max, step, isPercent)
+  local function Range(key, order, label, min, max, step, isPercent, desc)
     return Resettable({
-      type = "range", order = order, name = Label(key, label), desc = Desc(key),
+      type = "range", order = order, name = Label(key, label), desc = Desc(key, desc),
       min = min, max = max, step = step, isPercent = isPercent,
       get = function() return t[key] end,
       set = function(_, value) Set(key, value) end,
     }, key)
   end
 
-  local function Toggle(key, order, label)
+  local function Toggle(key, order, label, desc)
     return Resettable({
-      type = "toggle", order = order, width = 1.5, name = Label(key, label, true), desc = Desc(key),
+      type = "toggle", order = order, width = 1.5, name = Label(key, label, true), desc = Desc(key, desc),
       get = function() return t[key] == true end,
       set = function(_, value) Set(key, value) end,
     }, key)
@@ -541,9 +596,9 @@ local function SharedTabs(t, isDisplay, extra)
 
   -- A dropdown for a three-way key (Wants in SlopAuras.lua): true, false, or
   -- any. A display saves "any" so it can override a group's true/false.
-  local function ThreeWay(key, order, label, yes, no)
+  local function ThreeWay(key, order, label, yes, no, desc)
     return Resettable({
-      type = "select", order = order, name = Label(key, label), desc = Desc(key),
+      type = "select", order = order, name = Label(key, label), desc = Desc(key, desc),
       values = { any = "Any", yes = yes, no = no }, sorting = { "any", "yes", "no" },
       get = function()
         local value = t[key]
@@ -605,21 +660,21 @@ local function SharedTabs(t, isDisplay, extra)
       args = {
         inCombat = Resettable({
           type = "toggle", order = 1, width = 1.5, name = Label("glowCombat", "In combat", true),
-          desc = Desc("glowCombat"),
+          desc = Desc("glowCombat", "Glows while you're in combat."),
           get = function() return InCombat("in") end,
           set = function(_, value) SetCombat(value, InCombat("out")) end,
         }, "glowCombat"),
         outOfCombat = Resettable({
           type = "toggle", order = 2, width = 1.5, name = Label("glowCombat", "Out of combat", true),
-          desc = Desc("glowCombat"),
+          desc = Desc("glowCombat", "Glows while you're out of combat."),
           get = function() return InCombat("out") end,
           set = function(_, value) SetCombat(InCombat("in"), value) end,
         }, "glowCombat"),
         rowBreak = Break(2.5),
         outOfRange = Resettable({
           type = "toggle", order = 3, width = 1.5, name = Label("glowInRange", "Out of range", true),
-          desc = Desc("glowInRange", "Party and raid members only. Unticked, the glow hides while they're out of range, "
-            .. "the same check that fades Blizzard's party frames."),
+          desc = Desc("glowInRange", "Party and raid members only. Hides glows when units are out of range/faded out. "
+            .. "In combat or bgs, always glows."),
           get = function() return not t.glowInRange end,
           -- A display saves false so it can override a group's true.
           set = function(_, value) Set("glowInRange", not value or Off()) end,
@@ -630,14 +685,13 @@ local function SharedTabs(t, isDisplay, extra)
 
   -- One box of settings for a text on the icon (StyleString in Chain.lua):
   -- `prefix` "timer" or "stack", `hideKey` hides the text and greys the rest.
-  -- Missing icons have neither text.
-  local function TextBox(title, prefix, hideKey, hideLabel)
+  -- `moreArgs(Select, Disabled)` returns more args for this box only.
+  local function TextBox(boxOrder, title, prefix, hideKey, hideLabel, hideDesc, moreArgs)
     local function Key(name)
       return prefix .. name
     end
-    -- A control's own `disabled` replaces the panel's combat lock.
     local function Disabled()
-      return ns.Locked() or t[hideKey] == true
+      return t[hideKey] == true
     end
     local function Select(name, order, label, values, sorting, desc)
       local key = Key(name)
@@ -648,8 +702,8 @@ local function SharedTabs(t, isDisplay, extra)
         set = function(_, value) Set(key, value) end,
       }, key)
     end
-    local function Slider(name, order, label, min, max)
-      local option = Range(Key(name), order, label, min, max, 1)
+    local function Slider(name, order, label, min, max, desc)
+      local option = Range(Key(name), order, label, min, max, 1, nil, desc)
       option.disabled = Disabled
       return option
     end
@@ -662,53 +716,85 @@ local function SharedTabs(t, isDisplay, extra)
     -- A display saves false for the game font, so it can override a group's.
     font.set = function(_, value) Set(Key("Font"), value ~= "default" and value or Off()) end
 
-    return {
-      type = "group", inline = true, name = title,
-      hidden = function() return isDisplay and t.mode == "missing" end,
+    local box = {
+      type = "group", inline = true, order = boxOrder, name = title,
       args = {
-        hide = Toggle(hideKey, 1, hideLabel),
+        hide = Toggle(hideKey, 1, hideLabel, hideDesc),
         break1 = Break(1.5),
         font = font,
-        size = Slider("Size", 3, "Size", 6, 32),
-        outline = Select("Outline", 4, "Outline", OUTLINES, { "NONE", "OUTLINE", "THICKOUTLINE" }),
+        size = Slider("Size", 3, "Size", 6, 32, "Font size of the text."),
+        outline = Select("Outline", 4, "Outline", OUTLINES, { "NONE", "OUTLINE", "THICKOUTLINE" },
+          "The outline drawn around the letters."),
         break2 = Break(4.5),
         point = Select("Point", 5, "Position", POINTS, POINT_ORDER, "Where on the icon the text sits."),
         align = Select("Align", 6, "Alignment", ALIGNS, { "LEFT", "CENTER", "RIGHT" },
           "Which side of the text sits on Position. At a right-hand corner, Right keeps the text inside the icon "
           .. "and Left starts it there, running outward."),
         break3 = Break(6.5),
-        x = Slider("X", 7, "X", -50, 50),
-        y = Slider("Y", 8, "Y", -50, 50),
+        x = Slider("X", 7, "X", -50, 50, "Moves the text right (positive) or left (negative) from Position, in pixels."),
+        y = Slider("Y", 8, "Y", -50, 50, "Moves the text up (positive) or down (negative) from Position, in pixels."),
         break4 = Break(8.5),
         color = Resettable({
-          type = "color", order = 9, name = Label(Key("Color"), "Color", true), desc = Desc(Key("Color")),
+          type = "color", order = 9, name = Label(Key("Color"), "Color", true), desc = Desc(Key("Color"), "The text's color."),
           disabled = Disabled,
           get = function() return unpack(t[Key("Color")]) end,
           set = function(_, r, g, b) Set(Key("Color"), { r, g, b }) end,
         }, Key("Color")),
       },
     }
+    for name, option in pairs(moreArgs and moreArgs(Select, Disabled) or {}) do
+      box.args[name] = option
+    end
+    return box
+  end
+
+  -- The timer's number format (TimerFormatter in Chain.lua), on a row of its
+  -- own under Hide timer.
+  local function TimerFormatArgs(Select, Disabled)
+    local decimals = Range("timerDecimals", 1.7, "Increase precision below", 0, 60, 1)
+    decimals.desc = Desc("timerDecimals", "Under this many seconds left, the timer shows decimals. 0 turns them off.")
+    decimals.get = function() return t.timerDecimals or 0 end
+    decimals.disabled = Disabled
+    local precision = Select("Precision", 1.8, "Precision", { "12.3", "12.34", "12.345" }, { 1, 2, 3 },
+      "Decimal places under Increase precision below. Blizzard's format shows one.")
+    precision.disabled = function()
+      return Disabled() or t.timerFormat == "blizzard" or not t.timerDecimals or t.timerDecimals == 0
+    end
+    return {
+      format = Select("Format", 1.6, "Format",
+        { blizzard = "Blizzard", clock = "Clock: 3:07", short = "Short: 3m", long = "Long: 3m 7s" },
+        { "blizzard", "clock", "short", "long" },
+        "How the timer reads at about an hour, three minutes and ten seconds left.\n"
+        .. "Clock: 63:42, 3:07, 10\nShort: 2h, 3m, 10s\nLong: 1h 3m, 3m 7s, 10s\n"
+        .. "Blizzard: the game's own countdown."),
+      decimals = decimals,
+      precision = precision,
+      formatBreak = Break(1.9),
+    }
   end
 
   local look = {
     type = "group", name = "Appearance",
     args = {
-      size = Range("size", 1, "Size", 8, 128, 1),
-      spacing = Range("spacing", 2, "Spacing", 0, 40, 1),
-      alpha = Range("alpha", 3, "Alpha", 0, 1, 0.05, true),
+      size = Range("size", 1, "Size", 8, 128, 1, nil, "Width and height of each icon, in pixels."),
+      spacing = Range("spacing", 2, "Spacing", 0, 40, 1, nil, "Gap between icons, in pixels."),
+      alpha = Range("alpha", 3, "Alpha", 0, 1, 0.05, true, "How opaque the icons are. 100% is fully visible."),
       break1 = Break(3.9),
       zoom = Range("zoom", 4, "Zoom", 0, 1, 0.01, true),
-      max = Range("max", 4.3, "Max icons shown", 1, 40, 1),
+      max = Range("max", 4.3, "Max icons shown", 1, 40, 1, nil,
+        "Maximum number of icons this display shows."),
       break1b = Break(4.9),
       sort = {
-        type = "select", order = 6, name = Label("sort", "Sort"), desc = Desc("sort"), values = SortValues(),
+        type = "select", order = 6, name = Label("sort", "Sort"),
+        desc = Desc("sort", "The order icons are placed in. Default is the game's own order."), values = SortValues(),
         get = function() return t.sort or "Default" end,
         set = function(_, value) Set("sort", value) end,
       },
-      sortReverse = Toggle("sortReverse", 6.1, "Reverse sort"),
+      sortReverse = Toggle("sortReverse", 6.1, "Reverse sort", "Flips the sort order."),
       break2 = Break(6.9),
       tintMode = {
-        type = "select", order = 7, name = Label("tint", "Tint"), desc = Desc("tint"),
+        type = "select", order = 7, name = Label("tint", "Tint"),
+        desc = Desc("tint", "Colors the icon art."),
         values = { none = "None", custom = "Custom" },
         get = function() return type(t.tint) == "table" and "custom" or "none" end,
         -- A display's "none" is saved as false, so it can override a group's tint.
@@ -768,7 +854,7 @@ local function SharedTabs(t, isDisplay, extra)
         get = function() return unpack(t.borderColor) end,
         set = function(_, r, g, b) Set("borderColor", { r, g, b }) end,
       },
-      borderWidth = Range("borderWidth", 8.06, "Border width", 1, 8, 1),
+      borderWidth = Range("borderWidth", 8.06, "Border width", 1, 8, 1, nil, "How thick the plain border is, in pixels."),
       break2b = Break(8.1),
       glowMode = {
         type = "select", order = 8.2, name = Label("glow", "Glow"),
@@ -789,7 +875,7 @@ local function SharedTabs(t, isDisplay, extra)
       },
       glowWhen = GlowWhenBox(),
       break3 = Break(8.9),
-      desaturate = Toggle("desaturate", 9, "Desaturate"),
+      desaturate = Toggle("desaturate", 9, "Desaturate", "Shows the icon art in grayscale."),
       hideSwipe = Toggle("hideSwipe", 10, "Hide swipe"),
       tooltip = Resettable({
         type = "select", order = 10.5, name = Label("tooltip", "Tooltips"),
@@ -803,8 +889,15 @@ local function SharedTabs(t, isDisplay, extra)
         set = function(_, value) Set("tooltip", (value ~= "never" or isDisplay) and value or nil) end,
       }, "tooltip"),
       break4 = Break(10.9),
-      timerText = TextBox("Timer", "timer", "hideTimer", "Hide timer"),
-      stackText = TextBox("Stacks", "stack", "hideStacks", "Hide stacks"),
+    },
+  }
+  -- Missing icons have neither text.
+  local text = {
+    type = "group", name = "Text", hidden = ListOnly,
+    args = {
+      timer = TextBox(1, "Timer", "timer", "hideTimer", "Hide timer", "Hides the time-left countdown on each icon.",
+        TimerFormatArgs),
+      stacks = TextBox(2, "Stacks", "stack", "hideStacks", "Hide stacks", "Hides the stack count on each icon."),
     },
   }
   look.args.zoom.desc = Desc("zoom", "Crops the icon's edges. At 0% you see the whole texture, including the border drawn into it.")
@@ -821,7 +914,8 @@ local function SharedTabs(t, isDisplay, extra)
     args = {
       class = {
         type = "multiselect", order = 0, width = "full", values = ClassValues,
-        name = Label("class", "Classes (none ticked: all)"), desc = Desc("class"),
+        name = Label("class", "Classes (none ticked: all)"),
+        desc = Desc("class", "Shows only on characters of the ticked classes. None ticked: every class."),
         get = function(_, item) return tContains(ClassList(t.class), item) end,
         set = function(_, item, on)
           local list = CopyTable(ClassList(t.class))
@@ -835,15 +929,18 @@ local function SharedTabs(t, isDisplay, extra)
         end,
       },
       combat = {
-        type = "select", order = 1, name = Label("combat", "Combat state"), desc = Desc("combat"),
+        type = "select", order = 1, name = Label("combat", "Combat state"),
+        desc = Desc("combat", "Shows only in combat, only out of combat, or either."),
         values = { always = "Any", ["in"] = "In combat", out = "Out of combat" },
         sorting = { "always", "in", "out" },
         get = function() return t.combat or "always" end,
         -- A display saves "always" so it can override a group's in/out.
         set = function(_, value) Set("combat", (value ~= "always" or isDisplay) and value or nil) end,
       },
-      resting = ThreeWay("resting", 1.01, "Resting state", "Resting", "Not resting"),
-      mounted = ThreeWay("mounted", 1.02, "Mounted state", "Mounted", "Not mounted"),
+      resting = ThreeWay("resting", 1.01, "Resting state", "Resting", "Not resting",
+        "Shows only while resting (in an inn or city), only while not, or either."),
+      mounted = ThreeWay("mounted", 1.02, "Mounted state", "Mounted", "Not mounted",
+        "Shows only while mounted, only while not, or either."),
       breakState = Break(1.05),
       nameplateUnits = {
         type = "select", order = 1.1, name = Label("nameplateUnits", "Which nameplates"),
@@ -891,8 +988,9 @@ local function SharedTabs(t, isDisplay, extra)
         hidden = function() return t.knownSpell == nil end,
       },
       breakSpell = Break(1.97),
-      hideWhenPlayerDead = Toggle("hideWhenPlayerDead", 3.55, "Hide while you're dead"),
-      neverLoad = Toggle("neverLoad", 3.6, "Never load"),
+      hideWhenPlayerDead = Toggle("hideWhenPlayerDead", 3.55, "Hide while you're dead",
+        "Hides while you're dead or a ghost."),
+      neverLoad = Toggle("neverLoad", 3.6, "Never load", "Turns this off without deleting it."),
     },
   }
 
@@ -900,8 +998,8 @@ local function SharedTabs(t, isDisplay, extra)
   local unit = {
     type = "group", inline = true, order = 2, name = "Hide a unit's icons when",
     args = {
-      hideWhenDead = Toggle("hideWhenDead", 1, "Dead"),
-      hideWhenOffline = Toggle("hideWhenOffline", 2, "Offline"),
+      hideWhenDead = Toggle("hideWhenDead", 1, "Dead", "Hides a unit's icons while that unit is dead."),
+      hideWhenOffline = Toggle("hideWhenOffline", 2, "Offline", "Hides a unit's icons while that player is offline."),
       break0 = Break(2.9),
       hideWhenNotVisible = {
         type = "select", order = 3, name = Label("hideWhenNotVisible", "Out of sight"),
@@ -932,20 +1030,21 @@ local function SharedTabs(t, isDisplay, extra)
     },
   }
 
-  look.args.tint.desc = Desc("tint")
+  look.args.tint.desc = Desc("tint", "The color the icon art is tinted.")
   look.args.glowMode.desc = Desc("glow", "Blizzard's proc glow around each icon. It reaches about a fifth of the icon's size past each edge, so tight spacing lets it overlap the next icon.")
-  look.args.glow.desc = Desc("glow")
+  look.args.glow.desc = Desc("glow", "The glow's color.")
   Resettable(look.args.sort, "sort")
   Resettable(look.args.tintMode, "tint")
   look.args.skin.desc = Desc("skin", "Masque: the frame from the skin you pick for this group in Masque's options. "
     .. "The border color goes on the skin's ring.")
   Resettable(look.args.skin, "skin")
-  look.args.borderSource.desc = "Dispel color: by the aura's dispel type, red for none. "
-      .. "Custom: one color for every aura, missing icons included."
+  look.args.borderSource.desc = Desc({ "dispelBorder", "borderColor" }, "Draws a border around each icon. "
+    .. "Dispel color: by the aura's dispel type, red for none. Custom: one color for every aura, missing icons included.")
   Resettable(look.args.borderSource, { "dispelBorder", "borderColor" })
   look.args.borderStyle.desc = Desc("borderStyle", "Blizzard: the game's soft border art. Plain: a solid outline "
     .. "in the exact color, as wide as Border width.")
   Resettable(look.args.borderStyle, "borderStyle")
+  look.args.borderColor.desc = Desc("borderColor", "The border's color.")
   Resettable(look.args.borderColor, "borderColor")
   look.args.borderWidth.hidden = function()
     return not HasAnyBorder() or IsMasque() or t.borderStyle ~= "plain"
@@ -1014,14 +1113,13 @@ local function SharedTabs(t, isDisplay, extra)
       { "size", "zoom", "alpha" }, { "tintMode" }, { "tint" }, { "desaturate", "hideSwipe" },
       { "tooltip" },
     }),
-    text = Section(3, "Text", { { "timerText" }, { "stackText" } }),
-    border = Section(4, "Border", {
+    border = Section(3, "Border", {
       { "skin", "borderSource", "borderStyle" }, { "borderWidth" }, { "borderColor" },
     }),
-    glow = Section(5, "Glow", { { "glowMode" }, { "glow" }, { "glowWhen" } }),
+    glow = Section(4, "Glow", { { "glowMode" }, { "glow" }, { "glowWhen" } }),
   }
 
-  return look, load
+  return look, text, load
 end
 
 -- Import / export ------------------------------------------------------------
@@ -1059,9 +1157,10 @@ local function Names(names)
 end
 
 -- Adds the buttons, boxes and message row to `args`, from `order` on.
--- spec.export = { button, label, text }: text() makes the export.
+-- spec.export = { button, label, text } (optional): text() makes the export.
 -- spec.imports = { { key, button, label, onText }, ... }: onText(text) imports
 -- and returns true when the box can close (done, or a choice to answer).
+-- spec.width: the buttons' width.
 local function ShareBlock(args, state, order, spec)
   local function Open(key)
     return function()
@@ -1070,21 +1169,27 @@ local function ShareBlock(args, state, order, spec)
     end
   end
 
-  args.shareExport = { type = "execute", order = order, name = spec.export.button, func = Open("export") }
+  if spec.export then
+    args.shareExport = { type = "execute", order = order, width = spec.width, name = spec.export.button, func = Open("export") }
+  end
   for i, import in ipairs(spec.imports) do
-    args["shareImport" .. i] = { type = "execute", order = order + i / 10, name = import.button, func = Open(import.key) }
+    args["shareImport" .. i] = {
+      type = "execute", order = order + i / 10, width = spec.width, name = import.button, func = Open(import.key),
+    }
   end
   args.shareButtonsBreak = Break(order + 0.9)
 
   -- Single line: the multi-line box always shows an Accept button, which has
   -- nothing to do here. The single-line box only shows its button after typing.
-  args.shareExportBox = {
-    type = "input", order = order + 1, width = "full", name = spec.export.label, arg = { selectAll = true },
-    desc = "Click in the box, press Ctrl+A to select all, then Ctrl+C to copy.",
-    hidden = function() return state.open ~= "export" end,
-    get = spec.export.text,
-    set = function() end,
-  }
+  if spec.export then
+    args.shareExportBox = {
+      type = "input", order = order + 1, width = "full", name = spec.export.label, arg = { selectAll = true },
+      desc = "Click in the box, press Ctrl+A to select all, then Ctrl+C to copy.",
+      hidden = function() return state.open ~= "export" end,
+      get = spec.export.text,
+      set = function() end,
+    }
+  end
   for i, import in ipairs(spec.imports) do
     args["shareImportBox" .. i] = {
       type = "input", order = order + 1 + i / 10, width = "full", multiline = 8, name = import.label,
@@ -1278,40 +1383,93 @@ local function AddTopShare(args, order)
   args.shareChoiceBreak = Break(order + 2.9)
 end
 
-local function GroupShareTab(group)
-  local state = ShareState(group)
+-- The group's Export button, in its button row from `order` on; the box
+-- opens under the row.
+local function GroupExport(args, group, order, width)
+  ShareBlock(args, ShareState(group), order, {
+    width = width,
+    export = {
+      button = "Export", label = "This group as text",
+      text = function() return ns.Share.ExportGroup(group) end,
+    },
+    imports = {},
+  })
+end
+
+-- The Import display button and its box, from `order` on.
+local function DisplayImport(args, group, order, width)
+  local state = ShareState(tostring(group) .. ":add")
+  ShareBlock(args, state, order, {
+    width = width,
+    imports = {
+      {
+        key = "display", button = "Import display",
+        label = "Paste one display here, then click Accept to add it to the end of this group.",
+        onText = function(text)
+          local display, problem = ns.Share.Import(text, "display")
+          if not display then
+            Say(state, problem, "error")
+            return false
+          end
+          table.insert(group.displays, display)
+          ns.Prepare(group)
+          Changed(true)
+          AceConfigDialog:SelectGroup(addonName, "g" .. group.id, "displays", "d" .. #group.displays)
+          return true
+        end,
+      },
+    },
+  })
+end
+
+-- Only the display's own values move; Prepare points its metatable at the
+-- new group, so everything else follows that group.
+local function MoveToGroup(group, display, index, order)
   return {
-    type = "group", order = 6, name = "Import / export",
-    args = ShareBlock({}, state, 1, {
-      export = {
-        button = "Export this group", label = "This group as text",
-        text = function() return ns.Share.ExportGroup(group) end,
-      },
-      imports = {
-        {
-          key = "display", button = "Import a display",
-          label = "Paste one display here, then click Accept to add it to the end of this group.",
-          onText = function(text)
-            local display, problem = ns.Share.Import(text, "display")
-            if not display then
-              Say(state, problem, "error")
-              return false
-            end
-            table.insert(group.displays, display)
-            ns.Prepare(group)
-            Changed(true)
-            return true
-          end,
-        },
-      },
-    }),
+    type = "select", order = order, width = 1.5, name = "Move to group",
+    desc = "Moves this display to the end of the chosen group. Settings it doesn't set itself then come from that group.",
+    hidden = function() return #ns.groups < 2 end,
+    confirm = function(_, key)
+      local target = GroupByKey(key)
+      return target and ("Move %s to %s?"):format(DisplayLabel(display), target.name)
+    end,
+    values = function()
+      local values = {}
+      for _, other in ipairs(ns.groups) do
+        if other ~= group then
+          values["g" .. other.id] = other.name
+        end
+      end
+      return values
+    end,
+    sorting = function()
+      local keys = {}
+      for _, other in ipairs(SortedGroups()) do
+        if other ~= group then
+          table.insert(keys, "g" .. other.id)
+        end
+      end
+      return keys
+    end,
+    get = function() return nil end,
+    set = function(_, key)
+      local target = GroupByKey(key)
+      table.remove(group.displays, index)
+      table.insert(target.displays, display)
+      ns.Prepare(target)
+      Changed(true)
+      AceConfigDialog:SelectGroup(addonName, key, "displays", "d" .. #target.displays)
+    end,
   }
 end
 
 -- Keyed by group and position, so the state outlives the display it replaces.
 local function DisplayShareTab(group, display, index)
   local state = ShareState(tostring(group) .. ":" .. index)
-  local args = ShareBlock({}, state, 1, {
+  local args = ShareBlock({
+    moveTo = MoveToGroup(group, display, index, 0.1),
+    moveToBreak = Break(0.2),
+  }, state, 1, {
     export = {
       button = "Export this display", label = "This display as text",
       text = function() return ns.Share.ExportDisplay(display, state.withGroup) end,
@@ -1351,9 +1509,6 @@ end
 
 -- Displays -------------------------------------------------------------------
 -- A display is a tree entry under its group, with its settings in tabs.
-
--- The display whose "Move to group" dropdown is open, if any.
-local movingDisplay
 
 -- Checkboxes for display.dispelTypes, two per row. Chain.lua turns the list
 -- into the container's include or exclude map.
@@ -1402,37 +1557,13 @@ local function DisplayOptions(group, display, index, number)
   -- follow the display to its new key.
   local function MoveDisplay(by)
     if Move(list, index, by) then
-      AceConfigDialog:SelectGroup(addonName, "g" .. group.id, "d" .. (index + by))
+      AceConfigDialog:SelectGroup(addonName, "g" .. group.id, "displays", "d" .. (index + by))
     end
   end
 
   local what = {
     type = "group", order = 1, name = "Filters",
     args = {
-      name = {
-        type = "input", order = 0.5, width = 1.5, name = "Name",
-        desc = "Shown in this list. Leave empty to name it after its spell or filter.",
-        get = function() return rawget(display, "name") or "" end,
-        set = function(_, value)
-          value = strtrim(value)
-          display.name = value ~= "" and value or nil
-          Refresh()
-        end,
-      },
-      breakName = Break(0.6),
-      mode = {
-        type = "select", order = 1, name = "Shows", values = MODES,
-        desc = function()
-          return ("An \"Icon when none match\" display draws at the end of its %s, after the %s's other icons.")
-              :format(RowWord(group), RowWord(group))
-        end,
-        get = function() return display.mode end,
-        set = function(_, value)
-          display.mode = value
-          Changed(true)
-        end,
-      },
-      breakMode = Break(1.5),
       filter = {
         type = "input", order = 2, width = 1.5, name = "Filter",
         desc = "Join tokens with | and put ! before one to exclude it: HARMFUL|!CROWD_CONTROL. Empty means HELPFUL.",
@@ -1515,12 +1646,8 @@ local function DisplayOptions(group, display, index, number)
     display.filter = text ~= "" and text or nil
     Changed(false)
   end)
-  what.args.mode.desc = function()
-    return ("\"Icon when none match\" draws at the end of its %s, after the %s's other icons.")
-        :format(RowWord(group), RowWord(group))
-  end
 
-  local look, load = SharedTabs(display, true, {
+  local look, text, load = SharedTabs(display, true, {
     wrap = {
       type = "range", name = "Wrap after", min = 0, max = 40, step = 1,
       desc = function()
@@ -1536,100 +1663,57 @@ local function DisplayOptions(group, display, index, number)
       end,
     },
   })
-  look.order, load.order = 2, 3
+  look.order, text.order, load.order = 2, 3, 4
 
   return {
     type = "group", order = 100 + index, childGroups = "tab",
     name = function() return DisplayName(display, number) end,
     args = {
-      -- Drawn above the tabs: no box or title (unnamed inline group), a
-      -- horizontal rule (empty header) between the button pairs.
+      -- Drawn above the tabs: no box or title (unnamed inline group).
       actions = {
         type = "group", inline = true, order = 0, name = "",
         args = {
-          -- Two rows: reordering, then moving out or deleting.
-          up = { type = "execute", order = 1, width = 0.62, name = "Move up", func = function() MoveDisplay(-1) end },
-          down = { type = "execute", order = 2, width = 0.62, name = "Move down", func = function() MoveDisplay(1) end },
-          duplicate = {
-            type = "execute", order = 3, width = 0.62, name = "Duplicate",
-            desc = "Adds a copy below this one.",
-            func = function()
-              table.insert(list, index + 1, CopyTable(display))
-              ns.Prepare(group)
-              Changed(true)
-              AceConfigDialog:SelectGroup(addonName, "g" .. group.id, "d" .. (index + 1))
-            end,
-          },
-          breakReorder = Break(3.5),
-          delete = {
-            type = "execute", order = 5, width = 0.62, name = "Delete",
-            confirm = function() return ("Delete %s?"):format(DisplayLabel(display)) end,
-            func = function()
-              table.remove(list, index)
-              Changed(true)
-            end,
-          },
-          move = {
-            type = "execute", order = 4, width = 0.62, name = function() return movingDisplay == display and "Cancel" or "Move to" end,
-            hidden = function() return #ns.groups < 2 end,
-            func = function()
-              movingDisplay = movingDisplay ~= display and display or nil
+          name = {
+            type = "input", order = 5.1, width = 1.5, name = "Name",
+            desc = "Shown in this list. Leave empty to name it after its spell or filter.",
+            get = function() return rawget(display, "name") or "" end,
+            set = function(_, value)
+              value = strtrim(value)
+              display.name = value ~= "" and value or nil
               Refresh()
             end,
           },
-          breakActions = Break(5.5),
-          firstLineWarning = FirstLineWarning(group, 5.6),
-          -- Only the display's own values move; Prepare points its metatable
-          -- at the new group, so everything else follows that group.
-          moveTo = {
-            type = "select", order = 6, name = "Move to group",
-            desc = "Moves this display to the end of the chosen group. Settings it doesn't set itself then come from that group.",
-            hidden = function() return movingDisplay ~= display end,
-            confirm = function(_, key)
-              for _, other in ipairs(ns.groups) do
-                if "g" .. other.id == key then
-                  return ("Move %s to %s?"):format(DisplayLabel(display), other.name)
-                end
-              end
+          mode = {
+            type = "select", order = 5.2, name = "Shows", values = MODES,
+            desc = function()
+              return ("\"Icon when none match\" draws at the end of its %s, after the %s's other icons.")
+                  :format(RowWord(group), RowWord(group))
             end,
-            values = function()
-              local values = {}
-              for _, other in ipairs(ns.groups) do
-                if other ~= group then
-                  values["g" .. other.id] = other.name
-                end
-              end
-              return values
-            end,
-            sorting = function()
-              local keys = {}
-              for _, other in ipairs(ns.groups) do
-                if other ~= group then
-                  table.insert(keys, "g" .. other.id)
-                end
-              end
-              return keys
-            end,
-            get = function() return nil end,
-            set = function(_, key)
-              local target
-              for _, other in ipairs(ns.groups) do
-                if "g" .. other.id == key then
-                  target = other
-                end
-              end
-              movingDisplay = nil
-              table.remove(list, index)
-              table.insert(target.displays, display)
-              ns.Prepare(target)
+            get = function() return display.mode end,
+            set = function(_, value)
+              display.mode = value
               Changed(true)
-              AceConfigDialog:SelectGroup(addonName, key, "d" .. #target.displays)
             end,
           },
+          nameRow = Break(5.5),
+          up = Link(1, "up", "Move up", "Moves this display up one", function() MoveDisplay(-1) end),
+          down = Link(2, "down", "Move down", "Moves this display down one", function() MoveDisplay(1) end),
+          duplicate = Link(3, "duplicate", "Duplicate", "Adds a copy below this one", function()
+            table.insert(list, index + 1, CopyTable(display))
+            ns.Prepare(group)
+            Changed(true)
+            AceConfigDialog:SelectGroup(addonName, "g" .. group.id, "displays", "d" .. (index + 1))
+          end),
+          delete = Link(4, "delete", "Delete", "Removes this display", function()
+            table.remove(list, index)
+            Changed(true)
+          end, { confirm = function() return ("Delete %s?"):format(DisplayLabel(display)) end }),
+          breakActions = Break(4.5),
         },
       },
       what = what,
       look = look,
+      text = text,
       load = load,
       share = DisplayShareTab(group, display, index),
     },
@@ -1642,39 +1726,38 @@ local function BreakOptions(group, index)
   local list = group.displays
   local function MoveBreak(by)
     if Move(list, index, by) then
-      AceConfigDialog:SelectGroup(addonName, "g" .. group.id, "b" .. (index + by))
+      AceConfigDialog:SelectGroup(addonName, "g" .. group.id, "displays", "b" .. (index + by))
     end
   end
   return {
     type = "group", order = 100 + index, name = "|cff808080==============|r",
-    desc = function() return Capital(RowWord(group)) .. " break" end,
+    desc = "Line break",
     args = {
       intro = {
         type = "description", order = 0, width = "full",
         name = function()
-          return ("Displays after this start a new %s. Set where new %s go in the group's Layout tab.")
-              :format(RowWord(group), RowWord(group, true))
+          return ("Displays after this start a new %s."):format(RowWord(group))
         end,
       },
       introBreak = Break(0.5),
-      up = { type = "execute", order = 1, width = 0.62, name = "Move up", func = function() MoveBreak(-1) end },
-      down = { type = "execute", order = 2, width = 0.62, name = "Move down", func = function() MoveBreak(1) end },
-      delete = {
-        type = "execute", order = 3, width = 0.62, name = "Delete",
-        func = function()
-          table.remove(list, index)
-          Changed(true)
-        end,
-      },
+      up = Link(1, "up", "Move up", "Moves this line break up one", function() MoveBreak(-1) end),
+      down = Link(2, "down", "Move down", "Moves this line break down one", function() MoveBreak(1) end),
+      delete = Link(3, "delete", "Delete", function()
+        return ("Removes this line break. The displays after it join the %s before."):format(RowWord(group))
+      end, function()
+        table.remove(list, index)
+        Changed(true)
+      end),
       buttonsBreak = Break(3.5),
     },
   }
 end
 
 -- Groups ---------------------------------------------------------------------
--- In the tree a group has a "Settings" entry (tabs) followed by its displays.
--- AceConfigDialog puts a node's child groups either in the tree or in tabs,
--- never both, so the tabs live one level down under "Settings".
+-- A group is a leaf of the main tree with tabs; its displays are a second
+-- tree inside its Displays tab. AceConfigDialog puts a node's child groups
+-- either in the tree or in tabs (childGroups), never both, and draws a new
+-- tree for a tree group whose parent is a tab (FeedGroup).
 
 local function Field(group, key, structural)
   return function() return group[key] end, function(_, value)
@@ -1706,29 +1789,6 @@ local function AnchorField(group, slot, default)
   end
 end
 
--- `target` and `class` are saved as lists; the editor shows them as checkboxes.
-local function ListField(group, key, structural)
-  local function AsList()
-    local value = group[key]
-    if type(value) == "string" then
-      value = value ~= "" and { value } or {}
-    end
-    return value or {}
-  end
-  return function(_, item)
-    return tContains(AsList(), item)
-  end, function(_, item, on)
-    local list = AsList()
-    if on and not tContains(list, item) then
-      table.insert(list, item)
-    elseif not on then
-      tDeleteItem(list, item)
-    end
-    group[key] = list
-    Changed(structural)
-  end
-end
-
 
 -- A new display starts with the last display's filter: displays in one group
 -- usually match the same aura type.
@@ -1740,11 +1800,13 @@ local function AddDisplay(group)
   table.insert(group.displays, { mode = "list", filter = last and rawget(last, "filter") })
   ns.Prepare(group)
   Changed(true)
+  AceConfigDialog:SelectGroup(addonName, "g" .. group.id, "displays", "d" .. #group.displays)
 end
 
 local function AddLineBreak(group)
   table.insert(group.displays, { mode = "break" })
   Changed(true)
+  AceConfigDialog:SelectGroup(addonName, "g" .. group.id, "displays", "b" .. #group.displays)
 end
 
 -- The Lines section of a group's Layout tab.
@@ -1753,13 +1815,14 @@ local function LineControls(group)
   local args = {
     growth = {
       type = "select", order = 1, name = "Grow", values = GROWTHS, sorting = GROWTH_ORDER,
+      desc = "The direction new icons are added in. Centered keeps each line centered on the anchor.",
       get = growthGet, set = growthSet,
     },
     lines = {
       type = "select", order = 2,
       name = function() return ("New %s go"):format(RowWord(group, true)) end,
       desc = function()
-        return ("Displays after a %s break go this way: across from the way icons grow."):format(RowWord(group))
+        return "Displays after a line break go this way: across from the way icons grow."
       end,
       values = function()
         if ns.Chain.Vertical(group.growth) then
@@ -1804,17 +1867,17 @@ local function LineControls(group)
 end
 
 local function LayoutTab(group)
-  local function AnchorRange(slot, order, label)
+  local function AnchorRange(slot, order, label, desc)
     local get, set = AnchorField(group, slot, 0)
     return {
       type = "range", order = order, name = label, min = -2000, max = 2000, softMin = -600, softMax = 600, step = 1,
-      get = get, set = set,
+      desc = desc, get = get, set = set,
     }
   end
 
-  local function AnchorPoint(slot, order, label)
+  local function AnchorPoint(slot, order, label, desc)
     local get, set = AnchorField(group, slot, "CENTER")
-    return { type = "select", order = order, name = label, values = POINTS, get = get, set = set }
+    return { type = "select", order = order, name = label, desc = desc, values = POINTS, get = get, set = set }
   end
 
   local frameGet, frameSet = AnchorField(group, 2, "")
@@ -1840,11 +1903,11 @@ local function LayoutTab(group)
         get = frameGet, set = frameSet,
       },
       break2 = Break(5.9),
-      point = AnchorPoint(1, 6, "Group's point"),
-      relativePoint = AnchorPoint(3, 7, "To the frame's"),
+      point = AnchorPoint(1, 6, "Group's point", "The point on the group that's attached."),
+      relativePoint = AnchorPoint(3, 7, "To the frame's", "The point on the frame the group attaches to."),
       break3 = Break(7.9),
-      x = AnchorRange(4, 8, "X"),
-      y = AnchorRange(5, 9, "Y"),
+      x = AnchorRange(4, 8, "X", "Moves the group right (positive) or left (negative), in pixels."),
+      y = AnchorRange(5, 9, "Y", "Moves the group up (positive) or down (negative), in pixels."),
       break4 = Break(9.9),
       layer = {
         type = "range", order = 10, name = "Layer", min = 0, max = 10, step = 1,
@@ -1861,34 +1924,54 @@ local function LayoutTab(group)
   return { type = "group", order = 2, name = "Layout", args = { lines = LineControls(group), anchor = anchor } }
 end
 
--- One checkbox per unit kind, two per row, in TARGETS order. A multiselect
--- would sort them by key.
-local function UnitsBox(get, set)
-  local args = {}
-  for i, entry in ipairs(TARGETS) do
-    local kind = entry[1]
-    args[kind] = {
-      type = "toggle", order = i, width = 1.5, name = entry[2],
-      desc = "Anchored to each unit's own frame, every unit gets a row there. "
-          .. "Anchored to the screen or a named frame, the units share one row in this order.",
-      get = function() return get(nil, kind) end,
-      set = function(_, on) set(nil, kind, on) end,
-    }
-    if i % 2 == 0 then
-      args["break" .. i] = Break(i + 0.5)
+-- The group's `target` list as a dropdown of checkboxes. Keys are TARGETS
+-- indexes: the dropdown sorts its items by key, and this keeps TARGETS order.
+-- AceConfigDialog redraws a multiselect dropdown only when it closes, so a
+-- tick applies without Refresh, which would close it mid-pick.
+local function UnitsSelect(group, order)
+  local function AsList()
+    local value = group.target
+    if type(value) == "string" then
+      value = value ~= "" and { value } or {}
     end
+    return value or {}
   end
-  return { type = "group", inline = true, order = 2, name = "Units", args = args }
+  local values = {}
+  for i, entry in ipairs(TARGETS) do
+    values[i] = entry[2]
+  end
+  return {
+    type = "multiselect", order = order, width = 1.5, name = "Units", dialogControl = "Dropdown",
+    desc = "Which units this group shows icons for. Anchored to each unit's own frame, every unit gets a row there. "
+        .. "Anchored to the screen or a named frame, the units share one row in this order.",
+    values = values,
+    get = function(_, i) return tContains(AsList(), TARGETS[i][1]) end,
+    set = function(_, i, on)
+      local list, kind = AsList(), TARGETS[i][1]
+      if on and not tContains(list, kind) then
+        table.insert(list, kind)
+      elseif not on then
+        tDeleteItem(list, kind)
+      end
+      group.target = list
+      ns.Changed(true)
+    end,
+  }
 end
 
+-- `index`: the group's place in name order (SortedGroups).
 local function GroupOptions(group, index)
-  local targetGet, targetSet = ListField(group, "target", true)
+  local look, text, load = SharedTabs(group, false)
+  look.order, text.order, load.order = 1, 2, 3
 
-  local general = {
-    type = "group", order = 1, name = "Group",
+  -- Above the group's tabs, so they show on every tab. An inline group with
+  -- no name is drawn without a box or title.
+  local actions = {
+    type = "group", inline = true, order = 0, name = "",
     args = {
       name = {
-        type = "input", order = 1, width = "double", name = "Name",
+        type = "input", order = 0.1, width = 1.5, name = "Name",
+        desc = "The group's name in this list and in Masque's options.",
         validate = function(_, value)
           if value == "" then
             return "Give it a name."
@@ -1902,91 +1985,86 @@ local function GroupOptions(group, index)
           Changed(true)
         end,
       },
-      target = UnitsBox(targetGet, targetSet),
-    },
-  }
-
-  local look, load = SharedTabs(group, false)
-  look.order, load.order = 3, 4
-
-  -- Above the Settings tabs, so they show on every tab. An inline group with
-  -- no name is drawn without a box or title.
-  local actions = {
-    type = "group", inline = true, order = 0, name = "",
-    args = {
-      add = {
-        type = "execute", order = 1, width = 0.7, name = "Add display",
-        desc = "The new display lists matching auras. Set its Shows option to \"Icon when none match\" for a missing-aura icon.",
-        func = function() AddDisplay(group) end,
-      },
-      addBreak = {
-        type = "execute", order = 1.1, width = 0.7,
-        name = function() return ("Add %s break"):format(RowWord(group)) end,
-        desc = function()
-          return ("Displays you add after it start a new %s. Move it up or down to split %s elsewhere.")
-              :format(RowWord(group), RowWord(group, true))
-        end,
-        func = function() AddLineBreak(group) end,
-      },
+      target = UnitsSelect(group, 0.2),
+      nameRow = Break(0.5),
       testGroup = {
-        type = "execute", order = 1.2, width = 0.7, name = "Test group",
-        desc = "Preview this group with sample icons.",
+        type = "execute", order = 1, width = 0.7, name = "Test group",
+        desc = "Preview this group with sample icons. Unavailable in combat and PvP matches.",
         func = function() ns.OpenTest(group) end,
+        disabled = function() return ns.TestLocked() end,
       },
-      addBreakRow = Break(1.5),
-      -- The group itself: short labels, as on a display's page, so four fit.
-      up = { type = "execute", order = 2, width = 0.7, name = "Move up", func = function() Move(ns.groups, index, -1) end },
-      down = { type = "execute", order = 2.1, width = 0.7, name = "Move down", func = function() Move(ns.groups, index, 1) end },
       duplicate = {
-        type = "execute", order = 2.2, width = 0.7, name = "Duplicate",
-        desc = "Adds a copy of this group and its displays below it. The copy sits on top of the original until you move it.",
+        type = "execute", order = 1.1, width = 0.7, name = "Duplicate",
+        desc = "Adds a copy of this group and its displays. The copy sits on top of the original on screen until you move it.",
         func = function()
           -- CopyTable copies raw fields only, no metatables; Prepare adds them.
           local copy = CopyTable(group)
           copy.id = ns.NewGroupID()
           copy.name = UniqueName((group.name or "Group") .. " copy")
           ns.Prepare(copy)
-          table.insert(ns.groups, index + 1, copy)
+          table.insert(ns.groups, copy)
           Changed(true)
-          AceConfigDialog:SelectGroup(addonName, "g" .. copy.id, "settings")
+          AceConfigDialog:SelectGroup(addonName, "g" .. copy.id)
         end,
       },
       delete = {
-        type = "execute", order = 2.3, width = 0.7, name = "Delete",
+        type = "execute", order = 1.3, width = 0.7, name = "Delete",
         -- A confirm function returning a string sets the prompt (AceConfigDialog).
         confirm = function() return ("Delete %s and its displays?"):format(group.name or ("Group " .. group.id)) end,
         func = function()
-          table.remove(ns.groups, index)
+          tDeleteItem(ns.groups, group)
           Changed(true)
         end,
       },
-      rowBreak = Break(2.5),
       firstLineWarning = FirstLineWarning(group, 6),
     },
   }
+  -- Export sits between Duplicate and Delete and ends the row; its box
+  -- opens under it.
+  GroupExport(actions.args, group, 1.2, 0.7)
 
-  local tabs = {
-    general = general, placement = LayoutTab(group), look = look, load = load,
-    share = GroupShareTab(group),
-  }
-  tabs.actions = actions
-
-  -- Selecting the group itself opens Settings (see ns.InitOptions).
-  local args = {
-    settings = {
-      -- Gold, so it doesn't read as one of the displays listed under it.
-      type = "group", order = 2, name = "|cffffd100Settings|r", childGroups = "tab",
-      args = tabs,
+  -- The Displays tab's own options draw above its tree (FeedGroup feeds a
+  -- group's options before its tree), so these show on the Displays tab only.
+  local entries = {
+    add = {
+      type = "execute", order = 0.1, width = 0.85, name = "Add display",
+      desc = "The new display lists matching auras. Set its Shows option to \"Icon when none match\" for a missing-aura icon.",
+      func = function() AddDisplay(group) end,
+    },
+    addBreak = {
+      type = "execute", order = 0.2, width = 0.85, name = "Add line break",
+      desc = function()
+        return ("Displays you add after it start a new %s. Move it up or down to split %s elsewhere.")
+            :format(RowWord(group), RowWord(group, true))
+      end,
+      func = function() AddLineBreak(group) end,
+    },
+    empty = {
+      type = "description", order = 3, width = "full", fontSize = "medium",
+      name = "No displays yet",
+      hidden = function() return #group.displays > 0 end,
     },
   }
+  DisplayImport(entries, group, 0.2, 0.85)
   for number, display, i in ns.Displays(group) do
-    args["d" .. i] = DisplayOptions(group, display, i, number)
+    entries["d" .. i] = DisplayOptions(group, display, i, number)
   end
   for i, entry in ipairs(group.displays) do
     if entry.mode == "break" then
-      args["b" .. i] = BreakOptions(group, i)
+      entries["b" .. i] = BreakOptions(group, i)
     end
   end
+
+  local args = {
+    actions = actions,
+    displays = { type = "group", order = 1, name = "Displays", childGroups = "tree", args = entries },
+    placement = LayoutTab(group),
+    -- What every display uses unless it sets its own.
+    shared = {
+      type = "group", order = 3, name = "Shared settings", childGroups = "tab",
+      args = { look = look, text = text, load = load },
+    },
+  }
 
   -- An alert icon in the tree while FirstLineWarning shows, so it's seen from
   -- other pages too; hovering the entry shows its desc.
@@ -1997,7 +2075,7 @@ local function GroupOptions(group, index)
   local function TreeDesc()
     return ns.FirstLineConflict(group) and FirstLineTitle(group) .. "." or nil
   end
-  return { type = "group", order = 10 + index, name = TreeName, desc = TreeDesc, args = args }
+  return { type = "group", order = 10 + index, name = TreeName, desc = TreeDesc, childGroups = "tab", args = args }
 end
 
 -- Root -----------------------------------------------------------------------
@@ -2010,9 +2088,6 @@ local function NeedsReload()
 end
 
 local function Status()
-  if ns.Locked() then
-    return "|cffff4040Locked during combat.|r"
-  end
   if NeedsReload() then
     return "|cffff9933After large amounts of edits it is recommended you /reload to clean up unused frames.|r"
   end
@@ -2024,12 +2099,12 @@ local function NewGroup()
     id = ns.NewGroupID(),
     name = UniqueName("New group"),
     anchor = { "CENTER", nil, "CENTER", 0, 0 },
-    displays = { { mode = "list" } },
+    displays = {},
   }
   ns.Prepare(group)
   table.insert(ns.groups, group)
   Changed(true)
-  AceConfigDialog:SelectGroup(addonName, "g" .. group.id, "settings")
+  AceConfigDialog:SelectGroup(addonName, "g" .. group.id)
 end
 
 -- The status line as last drawn, so RefreshStatus redraws only when it changed.
@@ -2048,23 +2123,24 @@ local function Options()
     newGroup = { type = "execute", order = 2, name = "New group", func = NewGroup },
     testMode = {
       type = "execute", order = 2.5, name = "Test mode",
-      desc = "Preview your groups with sample icons.",
+      desc = "Preview your groups with sample icons. Unavailable in combat and PvP matches.",
       func = function() ns.OpenTest() end,
+      disabled = function() return ns.TestLocked() end,
     },
     topBreak = Break(3.9),
   }
   AddTopShare(args, 4)
-  for index, group in ipairs(ns.groups) do
+  for index, group in ipairs(SortedGroups()) do
     args["g" .. group.id] = GroupOptions(group, index)
   end
   return {
     type = "group", name = "SlopAuras", childGroups = "tree", args = args,
-    disabled = function() return ns.Locked() end,
   }
 end
 
--- The status line changes when combat starts or ends, or an apply retires
--- enough containers. Only then redraw: redrawing mid-drag would interrupt it.
+-- The status line changes when an apply retires enough containers, and the
+-- test buttons when combat or a restriction starts or ends. Only then redraw:
+-- redrawing mid-drag would interrupt it.
 local function RefreshStatus()
   local status = Status()
   if status ~= lastStatus then
@@ -2072,8 +2148,16 @@ local function RefreshStatus()
     Refresh()
   end
 end
-ns.OnLockChanged = RefreshStatus
 ns.OnApplied = RefreshStatus
+
+local lastTestLocked
+ns.OnLockChanged = function()
+  local locked = ns.TestLocked()
+  if locked ~= lastTestLocked then
+    lastTestLocked = locked
+    Refresh()
+  end
+end
 
 -- AceConfigDialog has no right-click hook, so after it draws our panel, each
 -- widget's mouse-enabled frames get an OnMouseUp hook. Widgets are pooled and
@@ -2085,7 +2169,7 @@ local hookedFrames = {}
 
 local function OnRightClick(frame, button)
   local widget = frame.obj
-  if button ~= "RightButton" or not widget or widget:GetUserData("appName") ~= addonName or ns.Locked() then
+  if button ~= "RightButton" or not widget or widget:GetUserData("appName") ~= addonName then
     return
   end
   local option = widget:GetUserData("option")
@@ -2142,14 +2226,24 @@ local function HookWidgets(container)
   end
 end
 
--- The tab keys of a display entry and of a group's Settings entry.
-local DISPLAY_TABS = { what = true, look = true, load = true, share = true }
-local SETTINGS_TABS = { general = true, placement = true, look = true, load = true, share = true }
-
--- AceConfigDialog remembers the selected tab per tree entry and reads it when
--- it draws the entry's tabs (status.groups.selected). Setting the same tab on
--- every entry that has it opens the next display or group on the tab in use.
-local function CarryTab(tab)
+-- AceConfigDialog remembers the selected tab per entry and reads it when it
+-- draws the entry's tabs (status.groups.selected). Setting the same tab on
+-- every entry at the same level opens the next display or group on the tab in
+-- use. Each level carries on its own: a display's tab set on its group would
+-- switch the group away from the Displays tab being shown.
+-- `level`: "group" (the group's tabs), "shared" (Shared settings' tabs) or
+-- "display".
+-- A missing display has no Text tab, so AceConfigDialog opens it on its first
+-- tab instead. That fallback isn't carried, so the next display with text
+-- still opens on Text.
+local displayTab
+local function CarryTab(tab, level, display)
+  if level == "display" then
+    if display and display.mode == "missing" and displayTab == "text" and tab ~= "text" then
+      return
+    end
+    displayTab = tab
+  end
   local function Select(path)
     local status = AceConfigDialog:GetStatusTable(addonName, path)
     status.groups = status.groups or {}
@@ -2157,13 +2251,14 @@ local function CarryTab(tab)
   end
   for _, group in ipairs(ns.groups) do
     local key = "g" .. group.id
-    if SETTINGS_TABS[tab] then
-      Select({ key, "settings" })
-    end
-    if DISPLAY_TABS[tab] then
+    if level == "display" then
       for _, _, i in ns.Displays(group) do
-        Select({ key, "d" .. i })
+        Select({ key, "displays", "d" .. i })
       end
+    elseif level == "shared" then
+      Select({ key, "shared" })
+    else
+      Select({ key })
     end
   end
 end
@@ -2240,15 +2335,16 @@ local function TestOptions()
     buttonsBreak = Break(5.5),
   }
   local groups = {}
-  for i, group in ipairs(ns.groups) do
+  for i, group in ipairs(SortedGroups()) do
     groups["g" .. group.id] = {
       type = "toggle", order = i, width = "full", name = group.name or ("Group " .. group.id),
+      desc = "Shows this group with sample icons while test mode is open.",
       get = function() return ns.IsTested(group) end,
       set = function(_, value) ns.SetTested(group, value) end,
     }
   end
   args.groups = { type = "group", inline = true, order = 6, name = "Groups", hidden = Collapsed, args = groups }
-  return { type = "group", name = "Test mode", args = args, disabled = function() return ns.Locked() end }
+  return { type = "group", name = "Test mode", args = args, disabled = function() return ns.TestLocked() end }
 end
 
 local function OnTestHide(frame)
@@ -2261,7 +2357,7 @@ end
 -- `only`: a group to test on its own (its "Test group" button); otherwise the
 -- ticks from last time, or every group the first time.
 function ns.OpenTest(only)
-  if ns.Locked() then
+  if ns.TestLocked() then
     return
   end
   if only or not testOpened then
@@ -2290,30 +2386,39 @@ end
 function ns.InitOptions()
   LibStub("AceConfig-3.0"):RegisterOptionsTable(addonName, Options)
   LibStub("AceConfig-3.0"):RegisterOptionsTable(TEST_APP, TestOptions)
-  AceConfigDialog:AddToBlizOptions(addonName, "SlopAuras")
-  AceConfigDialog:SetDefaultSize(addonName, 900, 640)
+  -- Only in its own window (/slop), not the game's Options -> AddOns: that
+  -- panel is too narrow for two trees beside the settings.
+  -- Wide enough for two trees (groups, and a group's displays) beside rows of
+  -- three 170px controls.
+  AceConfigDialog:SetDefaultSize(addonName, 1080, 640)
   hooksecurefunc(AceConfigDialog, "FeedGroup", function(_, appName, _, container, _, path)
     if appName ~= addonName then
       return
     end
     HookWidgets(container)
-    -- A tab's page: { group, display or "settings", tab }.
-    if path and #path == 3 and type(path[1]) == "string" and path[1]:match("^g%d+$") then
-      CarryTab(path[3])
-    end
-    -- A group's own page has nothing on it: its tabs live under its Settings
-    -- entry (AceConfigDialog can't give one node both tree children and
-    -- tabs). Selecting the group goes there instead, a frame later, once this
-    -- feed is done.
-    local key = path and #path == 1 and path[1]
-    if type(key) == "string" and key:match("^g%d+$") then
-      C_Timer.After(0, function() AceConfigDialog:SelectGroup(addonName, key, "settings") end)
+    -- A tab's page: { group, tab }, { group, "shared", tab } or
+    -- { group, "displays", display, tab }.
+    if path and type(path[1]) == "string" and path[1]:match("^g%d+$") then
+      if #path == 2 then
+        CarryTab(path[2], "group")
+      elseif #path == 3 and path[2] == "shared" then
+        CarryTab(path[3], "shared")
+      elseif #path == 4 then
+        local index = tonumber(path[3]:match("^d(%d+)$"))
+        local display
+        for _, group in ipairs(ns.groups) do
+          if "g" .. group.id == path[1] then
+            display = index and group.displays[index]
+          end
+        end
+        CarryTab(path[4], "display", display)
+      end
     end
   end)
   SLASH_SLOPAURAS1 = "/slop"
   -- Toggles AceConfigDialog's own window. Unlike the game's settings panel
   -- (C_SettingsUtil.OpenSettingsPanel refuses addon calls in combat), it opens
-  -- in combat too; the editor stays locked until combat ends (ns.Locked).
+  -- in combat too.
   SlashCmdList.SLOPAURAS = function()
     if AceConfigDialog.OpenFrames[addonName] then
       AceConfigDialog:Close(addonName)

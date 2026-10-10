@@ -31,6 +31,10 @@ local DEFAULTS = {
   timerAlign = "CENTER",
   timerX = 0,
   timerY = 0,
+  -- "blizzard" (the countdown's own), "clock", "short" or "long"
+  -- (TIMER_FORMATS in Chain.lua). No timerDecimals: the game's threshold.
+  timerFormat = "blizzard",
+  timerPrecision = 1,
   stackSize = 14,
   stackOutline = "OUTLINE",
   stackColor = { 1, 1, 1 },
@@ -245,6 +249,13 @@ end
 
 local rowConfigs = {}
 
+local OTHER_COMBAT = { ["in"] = "out", out = "in" }
+
+-- Whether a list display is built as glowing and plain copies (GlowCopies).
+local function GlowSplits(d)
+  return d.glow and OTHER_COMBAT[d.glowCombat] ~= nil
+end
+
 -- Whether any of the group's displays loads: Never load (inherited from the
 -- group unless a display overrides it) builds nothing.
 local function Loads(group)
@@ -306,15 +317,22 @@ local function ComputeRows()
           started, broken = true, false
           -- Only Masque-style displays' buttons are registered with Masque.
           local masque = display.skin == "masque" and "+masque" or ""
-          table.insert(parts, newLine .. display.mode .. masque)
+          -- A combat-limited glow builds two aura groups (GlowCopies).
+          local split = display.mode ~= "missing" and GlowSplits(display) and "+split" or ""
+          table.insert(parts, newLine .. display.mode .. masque .. split)
         end
       end
       if ns.StackDisplays(group) then
         table.insert(parts, "stack")
       end
+      local signature = table.concat(parts, "|")
+      -- Every setting of the group and its displays, plus the skin epoch: while
+      -- auras are secret a row can't be restyled, only rebuilt, so any change
+      -- to it means a new row (SyncHost).
+      local ok, json = pcall(C_EncodingUtil.SerializeJSON, group)
       table.insert(rows, {
-        group = group, targets = targets, lines = lines, signature = table.concat(parts, "|"),
-        shape = shape,
+        group = group, targets = targets, lines = lines, signature = signature, shape = shape,
+        fingerprint = ok and (signature .. "|" .. json .. "|" .. Chain.SkinEpoch()) or {},
       })
     end
   end
@@ -549,6 +567,11 @@ local function SyncSkins()
       skinNames[id] = name
     end
   end
+  -- Delete removes each button from Masque, which reads the button: refused
+  -- while auras are secret. The group then waits for a later apply.
+  if C_Secrets.ShouldAurasBeSecret() then
+    return
+  end
   for id, skin in pairs(skins) do
     if not live[id] then
       skin:Delete()
@@ -575,6 +598,29 @@ local function StyleFirstLine(row)
   end
 end
 
+-- A list display whose glow shows only in or only out of combat is built as
+-- two copies, one glowing and one plain, each loading in one combat state. A
+-- list button's glow can't be switched while auras are secret, which they are
+-- in combat, but an aura group can be turned on and off. A copy reads every
+-- other setting from the display; one the display's own combat load rules
+-- out is left out.
+local function GlowCopies(entry)
+  local d = entry.d
+  if not GlowSplits(d) then
+    return { entry }
+  end
+  local copies = {}
+  for _, copy in ipairs({
+    { combat = d.glowCombat, glowCombat = "always" },
+    { combat = OTHER_COMBAT[d.glowCombat], glow = false },
+  }) do
+    if d.combat ~= OTHER_COMBAT[copy.combat] then
+      copies[#copies + 1] = { d = setmetatable(copy, { __index = d }), j = entry.j }
+    end
+  end
+  return copies
+end
+
 local function ListDisplays(line)
   local displays = {}
   for k, entry in ipairs(line.listDisplays) do
@@ -599,7 +645,7 @@ end
 -- (Chain.CanResize), missing displays one with the same Masque registration.
 -- Only what's left is built. Containers no line takes are turned off and kept
 -- as spares for later edits, so moving a line break and back builds nothing.
--- Out of combat.
+-- Not while auras are secret: reuse restyles buttons (SyncHost).
 -- Whether the game shows placeholder auras (Edit Mode or test mode), from
 -- AURA_DATA_PROVIDER_SWITCH. Containers learn that only from the event, and a
 -- new one starts on real auras (Blizzard_ManagedAuraContainer.lua:95), so
@@ -636,6 +682,15 @@ local function AssignLines(row, host)
       merged.listDisplays[k] = line.listDisplays[1]
     end
     row.lines = { merged }
+  end
+  for _, line in ipairs(row.lines) do
+    local entries = {}
+    for _, entry in ipairs(line.listDisplays) do
+      for _, copy in ipairs(GlowCopies(entry)) do
+        entries[#entries + 1] = copy
+      end
+    end
+    line.listDisplays = entries
   end
   for i, line in ipairs(row.lines) do
     -- Later lines start at their own 1px origin, anchored by Relink. It may be
@@ -694,6 +749,7 @@ local function BuildRow(config, host)
   local group = config.group
   local row = {
     group = group, g = Chain.Layout(group.growth, config.lines), signature = config.signature, shape = config.shape,
+    fingerprint = config.fingerprint,
   }
 
   -- Everything in the row hangs off this 1px frame. On a unit frame it's a
@@ -864,16 +920,26 @@ end
 
 -- Brings a host's rows in line with rowConfigs: keeps rows of the same shape
 -- and gives their lines containers (AssignLines), builds new ones, retires
--- the rest.
+-- the rest. While auras are secret, reusing a container restyles its buttons,
+-- which the game refuses, so only unchanged rows are kept.
 local function SyncHost(host)
   local old, rows, bySignature = host.rowsBySignature or {}, {}, {}
+  local secret = C_Secrets.ShouldAurasBeSecret()
   for _, config in ipairs(rowConfigs) do
     if config.targets[host.kind] then
-      local row = old[config.signature] or SameShape(old, config)
+      local row
+      if secret then
+        row = old[config.signature]
+        row = row and row.fingerprint == config.fingerprint and row or nil
+      else
+        row = old[config.signature] or SameShape(old, config)
+      end
       if row then
         old[row.signature] = nil
-        row.group, row.signature = config.group, config.signature
-        AssignLines(row, host)
+        if not secret then
+          row.group, row.signature, row.fingerprint = config.group, config.signature, config.fingerprint
+          AssignLines(row, host)
+        end
       else
         row = BuildRow(config, host)
       end
@@ -1001,7 +1067,7 @@ local function SyncTesting()
       testGroups[group] = nil -- deleted
     end
   end
-  local want = testOpen and next(testGroups) ~= nil and not ns.Locked()
+  local want = testOpen and next(testGroups) ~= nil and not ns.TestLocked()
   if want ~= testing then
     testing = want
     Chain.SetTestFilters(want)
@@ -1209,19 +1275,6 @@ local function SetHostUnit(host, unit)
   UpdateHost(host)
 end
 
--- Building waits for auras to stop being secret ------------------------------
-
-local pending = {} -- functions waiting for auras to stop being secret
-
--- Containers refuse to be configured while auras are secret.
-local function WhenSafe(fn)
-  if C_Secrets.ShouldAurasBeSecret() then
-    table.insert(pending, fn)
-  else
-    fn()
-  end
-end
-
 -- Party and raid -------------------------------------------------------------
 -- One host per Blizzard compact party or raid frame, members and pets. When
 -- Blizzard gives the frame a new unit, the host's containers follow. In a raid Blizzard hides
@@ -1271,15 +1324,12 @@ end
 -- frame, within a time budget. A host builds every raid group's rows (each aura
 -- group makes 10 buttons up front), and joining a raid or opening Edit Mode's
 -- raid preview hands out up to 40 frames at once: built together, the game
--- froze. Containers can't be built while auras are secret, so it waits then.
+-- froze.
 local BUILD_BUDGET_MS = 4
 local raidQueue, queued = {}, {}
 local builder = CreateFrame("Frame")
 builder:Hide()
 builder:SetScript("OnUpdate", function(self)
-  if C_Secrets.ShouldAurasBeSecret() then
-    return
-  end
   local start = debugprofilestop()
   repeat
     local entry = table.remove(raidQueue, 1)
@@ -1452,10 +1502,11 @@ end
 
 -- Editor changes -------------------------------------------------------------
 -- The editor writes straight into ns.groups and calls ns.Changed. Changes are
--- applied together a moment later (a slider drag sends many), out of combat.
+-- applied together a moment later (a slider drag sends many).
 
--- The editor is locked while auras are secret: containers refuse changes then.
-function ns.Locked()
+-- Test mode is unavailable in combat and while auras are secret: the switch
+-- to placeholder auras is refused then.
+function ns.TestLocked()
   return inCombat or C_Secrets.ShouldAurasBeSecret()
 end
 
@@ -1464,14 +1515,72 @@ function ns.Leaked()
   return leaked
 end
 
+-- Pushes every setting to a host's rows. While auras are secret, buttons
+-- can't be restyled (SyncHost rebuilt every changed row instead), so only
+-- what's outside them is touched.
+local function ConfigureHost(host)
+  local secret = C_Secrets.ShouldAurasBeSecret()
+  for _, row in ipairs(host.rows) do
+    PlaceOrigin(row, host)
+    StyleFirstLine(row)
+    if not secret then
+      for inst in EachInst(row) do
+        Chain.Configure(inst, row.g, row.group.lineSpacing)
+      end
+      for _, line in ipairs(row.lines) do
+        if line.list then
+          Chain.SetWrap(line.list, LineWrap(row.group, line))
+        end
+      end
+    end
+  end
+  UpdateRange(host) -- new rows start out in range
+  UpdateHost(host, true)
+end
+
+-- While auras are secret every edit rebuilds the changed rows on each host
+-- they're on (up to 40 for raid or nameplate groups), so hosts are synced a
+-- few per frame within BUILD_BUDGET_MS; at once, the game froze.
+local syncQueue, syncQueued = {}, {}
+local syncer = CreateFrame("Frame")
+syncer:Hide()
+syncer:SetScript("OnUpdate", function(self)
+  local start = debugprofilestop()
+  repeat
+    local host = table.remove(syncQueue, 1)
+    syncQueued[host] = nil
+    Batch(function()
+      SyncHost(host)
+      ConfigureHost(host)
+    end)
+  until #syncQueue == 0 or debugprofilestop() - start > BUILD_BUDGET_MS
+  if #syncQueue == 0 then
+    self:Hide()
+    if ns.OnApplied then
+      ns.OnApplied()
+    end
+  end
+end)
+
 -- Rebuilds rows whose structure changed, then pushes every setting to the
 -- containers that stay.
 local function Apply(structural)
   -- Configure below sends every container its real filters again.
   restoring = restoring and testing
   SyncSkins()
-  if structural or BuildFlags() ~= buildFlags then
+  local secret = C_Secrets.ShouldAurasBeSecret()
+  if structural or secret or BuildFlags() ~= buildFlags then
     rowConfigs = ComputeRows()
+    if secret then
+      for _, host in ipairs(hosts) do
+        if not syncQueued[host] then
+          syncQueued[host] = true
+          table.insert(syncQueue, host)
+        end
+      end
+      syncer:Show()
+      return
+    end
     for _, host in ipairs(hosts) do
       SyncHost(host)
     end
@@ -1479,20 +1588,7 @@ local function Apply(structural)
 
   Batch(function()
     for _, host in ipairs(hosts) do
-      for _, row in ipairs(host.rows) do
-        PlaceOrigin(row, host)
-        StyleFirstLine(row)
-        for inst in EachInst(row) do
-          Chain.Configure(inst, row.g, row.group.lineSpacing)
-        end
-        for _, line in ipairs(row.lines) do
-          if line.list then
-            Chain.SetWrap(line.list, LineWrap(row.group, line))
-          end
-        end
-      end
-      UpdateRange(host) -- new rows start out in range
-      UpdateHost(host, true)
+      ConfigureHost(host)
     end
   end)
 end
@@ -1507,15 +1603,13 @@ function ns.Changed(structural)
   end
   applyQueued = true
   C_Timer.After(0.1, function()
-    WhenSafe(function()
-      applyQueued = false
-      local wasStructural = structuralPending
-      structuralPending = false
-      Apply(wasStructural)
-      if ns.OnApplied then
-        ns.OnApplied()
-      end
-    end)
+    applyQueued = false
+    local wasStructural = structuralPending
+    structuralPending = false
+    Apply(wasStructural)
+    if ns.OnApplied then
+      ns.OnApplied()
+    end
   end)
 end
 
@@ -1550,7 +1644,7 @@ local function Build()
   BuildParty()
   if CompactPartyFrame_Generate then
     hooksecurefunc("CompactPartyFrame_Generate", function()
-      WhenSafe(BuildParty)
+      BuildParty()
     end)
   end
   -- Raid frames get theirs as Blizzard hands them units (the hook above).
@@ -1586,11 +1680,12 @@ events:RegisterEvent("UNIT_PET")
 events:RegisterEvent("NAME_PLATE_UNIT_ADDED")
 events:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
 events:RegisterEvent("AURA_DATA_PROVIDER_SWITCH")
+events:RegisterEvent("ADDON_RESTRICTION_STATE_CHANGED")
 if C_EventUtils.IsEventValid("PLAYER_FOCUS_CHANGED") then
   events:RegisterEvent("PLAYER_FOCUS_CHANGED")
 end
 
-events:SetScript("OnEvent", function(_, event, arg)
+events:SetScript("OnEvent", function(_, event, arg, arg2)
   if event == "NAME_PLATE_UNIT_ADDED" then
     if built then
       OnPlateAdded(arg)
@@ -1615,7 +1710,8 @@ events:SetScript("OnEvent", function(_, event, arg)
     -- REGEN event follows for a fight already going.
     inCombat = UnitAffectingCombat("player")
     Chain.SetCombat(inCombat)
-    WhenSafe(Build)
+    Chain.HoldRange(C_Secrets.ShouldAurasBeSecret())
+    Build()
   elseif event == "PLAYER_REGEN_DISABLED" then
     inCombat = true
     Chain.SetCombat(true)
@@ -1628,15 +1724,33 @@ events:SetScript("OnEvent", function(_, event, arg)
     inCombat = false
     Chain.SetCombat(false)
     UpdateCombatGlows()
-    local queue = pending
-    pending = {}
-    for _, fn in ipairs(queue) do
-      fn()
-    end
     UpdateAll()
     if ns.OnLockChanged then
       ns.OnLockChanged()
     end
+  elseif event == "ADDON_RESTRICTION_STATE_CHANGED" then
+    -- arg2 Activating: the restriction isn't enforced until this event is
+    -- done, the last moment buttons can be changed before auras turn secret.
+    -- Range-limited glows go fully visible for the duration (Chain.HoldRange).
+    if arg2 == Enum.AddOnRestrictionState.Activating and not C_Secrets.ShouldAurasBeSecret() then
+      Chain.HoldRange(true)
+      for _, host in ipairs(hosts) do
+        UpdateRange(host)
+      end
+    end
+    -- Checked a frame later, once ShouldAurasBeSecret reflects the change.
+    -- Test mode's lock follows it too.
+    C_Timer.After(0, function()
+      if not C_Secrets.ShouldAurasBeSecret() then
+        Chain.HoldRange(false)
+        for _, host in ipairs(hosts) do
+          UpdateRange(host)
+        end
+      end
+      if ns.OnLockChanged then
+        ns.OnLockChanged()
+      end
+    end)
   elseif event == "PLAYER_TARGET_CHANGED" then
     if singleHosts.target then
       RefreshHost(singleHosts.target)

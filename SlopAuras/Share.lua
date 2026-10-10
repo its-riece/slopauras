@@ -146,6 +146,14 @@ local POINTS = Set("TOPLEFT", "TOP", "TOPRIGHT", "LEFT", "CENTER", "RIGHT", "BOT
 local OUTLINES = Set("NONE", "OUTLINE", "THICKOUTLINE")
 local ALIGNS = Set("LEFT", "CENTER", "RIGHT")
 
+-- Decimal places, built into a format string (TimerFormatter in Chain.lua).
+local function Precision(value, path)
+  if value ~= 1 and value ~= 2 and value ~= 3 then
+    Fail(path, "should be 1, 2 or 3")
+  end
+  return value
+end
+
 local function FontName(value, path)
   if value ~= false and (type(value) ~= "string" or value == "") then
     Fail(path, "should be a font name or false")
@@ -210,6 +218,9 @@ local SHARED = {
   timerY = function() return Number(-50, 50) end,
   stackX = function() return Number(-50, 50) end,
   stackY = function() return Number(-50, 50) end,
+  timerFormat = function() return OneOf(Set("blizzard", "clock", "short", "long")) end,
+  timerDecimals = function() return Number(0, 60) end,
+  timerPrecision = function() return Precision end,
   tint = function()
     return function(value, path)
       if value == false then

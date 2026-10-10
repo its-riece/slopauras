@@ -308,6 +308,10 @@ function Chain.Reskinned()
   skinEpoch = skinEpoch + 1
 end
 
+function Chain.SkinEpoch()
+  return skinEpoch
+end
+
 -- `crop`: a skin's tex coords for the icon (SkinCrop); zoom crops inside them.
 local function StyleIcon(texture, d, crop)
   -- Zoom keeps the middle (1 - zoom / 2) of the texture on each axis, as
@@ -550,10 +554,19 @@ local function ShowGlow(texture, anim, on)
   end
 end
 
+-- While held (Chain.HoldRange), glows show at any range: a list button's glow
+-- can't be changed while auras are secret, so it's set fully visible just
+-- before they turn secret.
+local rangeHeld = false
+
+function Chain.HoldRange(held)
+  rangeHeld = held
+end
+
 -- d.glowInRange hides the glow while the unit is out of range. `inRange` is
 -- UnitInRange's secret answer (or true), so only SetAlphaFromBoolean may use it.
 local function ApplyRange(texture, d, inRange)
-  if d.glowInRange then
+  if d.glowInRange and not rangeHeld then
     pcall(texture.SetAlphaFromBoolean, texture, inRange, 1, 0)
   else
     pcall(texture.SetAlpha, texture, 1)
@@ -681,6 +694,7 @@ local STYLE_KEYS = {
   "dispelBorder", "borderColor", "skin", "borderStyle", "borderWidth", "glow", "glowCombat",
   "glowInRange", "hideTimer", "hideStacks", "tooltip",
   "timerSize", "timerFont", "timerOutline", "timerColor", "timerPoint", "timerAlign", "timerX", "timerY",
+  "timerFormat", "timerDecimals", "timerPrecision",
   "stackSize", "stackFont", "stackOutline", "stackColor", "stackPoint", "stackAlign", "stackX", "stackY",
 }
 
@@ -728,6 +742,78 @@ local function StyleString(text, anchor, d, prefix, face)
   return ok
 end
 
+-- Timer formats as NumericRuleFormatter breakpoints (C_StringUtil): the
+-- engine formats the secret time left, Lua never sees it. Each rule applies
+-- from its threshold up. Whole units round up, as Blizzard's countdown does,
+-- so "1" shows until the aura ends; a rule starts just past the value the
+-- one below would round up to its limit, so 59.5s reads "1m", not "60s".
+local UP, DOWN = Enum.NumericRuleFormatRounding.Up, Enum.NumericRuleFormatRounding.Down
+local TINY = 0.000001
+local MINUTES = { div = 60, step = 1, rounding = DOWN }
+local TIMER_FORMATS = {
+  clock = { -- 63:42, 3:07, 10
+    { threshold = TINY, format = "%d", step = 1, rounding = UP },
+    { threshold = 59 + TINY, format = "%d:%02d", step = 1, rounding = UP, components = { MINUTES, { mod = 60 } } },
+  },
+  short = { -- 2h, 3m, 10s
+    { threshold = TINY, format = "%ds", step = 1, rounding = UP },
+    { threshold = 59 + TINY, format = "%dm", step = 60, rounding = UP, components = { { div = 60 } } },
+    { threshold = 3540 + TINY, format = "%dh", step = 3600, rounding = UP, components = { { div = 3600 } } },
+  },
+  long = { -- 1h 3m, 3m 7s, 10s
+    { threshold = TINY, format = "%ds", step = 1, rounding = UP },
+    { threshold = 59 + TINY, format = "%dm %ds", step = 1, rounding = UP, components = { MINUTES, { mod = 60 } } },
+    { threshold = 3540 + TINY, format = "%dh %dm", step = 60, rounding = UP,
+      components = { { div = 3600, step = 1, rounding = DOWN }, { div = 60, mod = 60 } } },
+  },
+}
+
+-- Formatters are shared by every button with the same settings.
+local timerFormatters = {}
+
+-- `below` seconds: under it, `precision` decimal places (0 for none).
+local function TimerFormatter(format, below, precision)
+  local key = format .. ":" .. below .. ":" .. precision
+  if timerFormatters[key] then
+    return timerFormatters[key]
+  end
+  local rules = { { threshold = 0, format = "" } }
+  if below > 0 then
+    rules[2] = { threshold = TINY, format = "%." .. precision .. "f", step = 10 ^ -precision, rounding = UP }
+  end
+  -- Rules wholly under `below` give way to decimals; the one in effect at
+  -- `below` starts there.
+  local base = TIMER_FORMATS[format]
+  for i, rule in ipairs(base) do
+    local nextRule = base[i + 1]
+    if not nextRule or nextRule.threshold > below then
+      local copy = CopyTable(rule)
+      copy.threshold = math.max(rule.threshold, below)
+      rules[#rules + 1] = copy
+    end
+  end
+  local formatter = C_StringUtil.CreateNumericRuleFormatter()
+  formatter:SetBreakpoints(rules)
+  timerFormatters[key] = formatter
+  return formatter
+end
+
+-- "blizzard", or any format not in TIMER_FORMATS, keeps the countdown's own
+-- formatting, where the only extra is its one-decimal threshold; nil
+-- timerDecimals puts back the game's.
+local function StyleTimerFormat(part, d)
+  local cooldown = part.cooldown
+  part.decimalsDefault = part.decimalsDefault or cooldown:GetCountdownMillisecondsThreshold()
+  local formatter, decimals = nil, part.decimalsDefault
+  if not TIMER_FORMATS[d.timerFormat] then
+    decimals = d.timerDecimals or decimals
+  else
+    formatter = TimerFormatter(d.timerFormat, d.timerDecimals or 0, d.timerPrecision)
+  end
+  local ok = pcall(cooldown.SetCountdownFormatter, cooldown, formatter)
+  return pcall(cooldown.SetCountdownMillisecondsThreshold, cooldown, decimals) and ok
+end
+
 -- Applies the display's look to one button's parts. Out of combat only.
 -- Returns false if Blizzard refused part of it.
 local function StyleButton(part, d)
@@ -757,6 +843,7 @@ local function StyleButton(part, d)
   -- texts are styled after Masque, which places the count from the skin.
   ok = pcall(part.cooldown.SetHideCountdownNumbers, part.cooldown, d.hideTimer == true) and ok
   ok = pcall(part.cooldown.SetDrawSwipe, part.cooldown, not d.hideSwipe) and ok
+  ok = StyleTimerFormat(part, d) and ok
   local timer = part.cooldown:GetCountdownFontString()
   if timer then
     part.timerFace = part.timerFace or timer:GetFont()
@@ -1380,23 +1467,16 @@ function Chain.SetRange(inst, inRange)
   end
 end
 
--- After SetCombat. Only glows that depend on combat are touched; restarting
--- the rest would make every glow skip.
+-- After SetCombat. Only a missing display's glow is switched here: it's on
+-- our own holder. A list button's glow is inside the aura button, which the
+-- game refuses to let us touch while auras are secret (as they are in
+-- combat), so a list display whose glow depends on combat is built as two
+-- copies loading in and out of combat instead (GlowCopies, SlopAuras.lua).
 function Chain.UpdateCombatGlows(inst)
   if inst.window then
     local d = inst.display
     if d.glowCombat == "in" or d.glowCombat == "out" then
       ShowGlow(inst.glow, inst.glowAnim, inst.active and GlowNow(d))
-    end
-    return
-  end
-  for j, d in ipairs(inst.displays) do
-    if d.glowCombat == "in" or d.glowCombat == "out" then
-      for _, part in ipairs(inst.parts[j]) do
-        if part.glow then
-          ShowGlow(part.glow, part.glowAnim, part.glowOn and GlowNow(d))
-        end
-      end
     end
   end
 end

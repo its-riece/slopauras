@@ -96,8 +96,8 @@ tags in `Blizzard_APIDocumentationGenerated` before relying on it.
 ## How a group becomes frames
 
 Wording: the editor calls a line a **row**, or a **column** when icons grow up or down
-(`RowWord` in Options.lua), and a line break a row or column break, because players found it
-clearer than "line". In the code, "line" is a line and "row" is one group on one host, as
+(`RowWord` in Options.lua), because players found it clearer than "line". A line break is
+always a "line break". In the code, "line" is a line and "row" is one group on one host, as
 below.
 
 - **Host:** one unit's place on screen (player, target, focus, each party or raid
@@ -186,13 +186,21 @@ below.
 
 ## The editor (Options.lua)
 
-- `/slop` toggles AceConfigDialog's standalone window; the same options table also sits
-  in the game's Options → AddOns. `Refresh` (`NotifyChange`) redraws whichever is open.
+- `/slop` toggles AceConfigDialog's standalone window, the editor's only home: it isn't in
+  the game's Options → AddOns, which is too narrow for its two trees. `Refresh`
+  (`NotifyChange`) redraws it.
 - Options.lua rebuilds its AceConfig options table from `ns.groups` on every redraw.
   Per-page UI state (open import boxes, pickers) lives in upvalues keyed by page.
-- Tree: each group has a gold "Settings" entry (tabs) followed by its displays. A node can't
-  have both tree children and tabs, so selecting a group redirects to its Settings entry (a
-  `FeedGroup` hook). Displays are keyed by position (`d1`, `d2`...).
+- Tree: groups only, in name order (`SortedGroups`; their order in `ns.groups` does
+  nothing outside the editor). Above a group's tabs: Name, Units (a multiselect dropdown)
+  and the group buttons: Test group, Duplicate, Export, Delete. Tabs: "Displays" has Add
+  display / Add line break / Import display above a second tree of the group's displays and
+  line breaks (a tab's own options draw above its tree); Layout (group-only); "Shared settings" has its own tabs, the Appearance
+  and Load conditions every display uses unless it sets its own. Above a display's tabs:
+  its text links (`Link`), then Name and Shows; its Import / export tab also holds Move to group. A node's child groups go either in the tree
+  or in tabs (`childGroups`), never both; AceConfigDialog draws a new tree for a tree group
+  under a tab. Displays are keyed by position (`d1`, `d2`...), so their path is
+  `{ "g<id>", "displays", "d<i>" }`.
 - Right-click on a control clears a display's own value (`HookWidgets`, `Resettable`).
 - Appearance is built flat in `SharedTabs`, then grouped into sections (Arrangement, Icon,
   Text, Border, Glow) by `Section` at its end; Text holds one `TextBox` each for the timer
@@ -216,7 +224,7 @@ below.
   `GROUP_ONLY`), Share.lua checks every value, and nothing changes until the whole string
   passes.
 - Writing a config for a player: those spec tables are the authority for keys, ranges and
-  values; start from the player's own export (the editor's Import / export tabs) and change
+  values; start from the player's own export (the editor's Export buttons) and change
   only what was asked. Filter tokens and sort methods are Blizzard's (`AuraUtil.AuraFilters`,
   `AuraContainerSortMethod`), and the platform rules above decide what can match.
 - Giving a player a string: put the whole string in your reply, in a code block, however
@@ -230,7 +238,9 @@ Shared (group or display): `size`, `spacing`, `alpha`, `zoom`,
 (`"never"`, `"always"`, `"out"`), and per text
 (`timer…` for the countdown, `stack…` for the count): `Size`, `Font` (a LibSharedMedia name,
 `false` for the text's own), `Outline` (`NONE`, `OUTLINE`, `THICKOUTLINE`), `Color`, `Point`,
-`Align` (`LEFT`, `CENTER`, `RIGHT`), `X`, `Y`; `glow`, `glowCombat` (`"never"`
+`Align` (`LEFT`, `CENTER`, `RIGHT`), `X`, `Y`; `timerFormat` (`blizzard`, `clock`, `short`,
+`long`), `timerDecimals` (0-60 seconds; absent: the game's own threshold), `timerPrecision`
+(1-3); `glow`, `glowCombat` (`"never"`
 too), `glowInRange`, `combat`, `neverLoad`, `knownSpell` (an ID or list; negative = must not
 know; at least one positive must be known), `hideWhenPlayerDead`, `class`, `nameplateUnits`,
 `resting` and `mounted` (`true` only while, `false` only while not, `"any"`), `hideWhenDead`,
