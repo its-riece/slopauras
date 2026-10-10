@@ -264,7 +264,7 @@ Use the labels exactly as below; they are what the player sees. The editor says 
   - **Load conditions:** a "Your character" box (Classes; Combat state, Resting state,
     Mounted state; Which nameplates, on nameplate groups only; Only if you know spell;
     Hide while you're dead, Never load) and a "Hide a unit's icons when" box (Dead,
-    Offline, Out of sight).
+    Offline, Out of sight; Power types, checkboxes for Mana, Rage, Energy, Focus).
   - **Import / export:** Move to group (with two or more groups), Export this display
     (with Include the group's values), Import new settings.
 - **Layout tab:** a Rows (or Columns) box: Grow, New rows go, Row spacing, Show only the
@@ -332,7 +332,9 @@ Shared (group or display): `size`, `spacing`, `alpha`, `zoom`,
 too), `glowInRange`, `combat`, `neverLoad`, `knownSpell` (an ID or list; negative = must not
 know; at least one positive must be known), `hideWhenPlayerDead`, `class`, `nameplateUnits`,
 `resting` and `mounted` (`true` only while, `false` only while not, `"any"`), `hideWhenDead`,
-`hideWhenOffline`, `hideWhenNotVisible`.
+`hideWhenOffline`, `hideWhenNotVisible`, `unitPower` (a list of `MANA`, `RAGE`, `ENERGY`,
+`FOCUS`: shows only on units whose current `UnitPowerType` token is listed; a unit with no
+token matches nothing; empty or absent: any; a display's empty list overrides its group's).
 
 Display only: `name`, `mode` (`list`, `missing`), `filter` (absent = `"HELPFUL"`; a group
 `filter` from older saves or strings moves to its displays, `ns.MoveGroupFilter`), `wrap` (icons per row on

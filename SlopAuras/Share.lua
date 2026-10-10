@@ -272,6 +272,7 @@ local SHARED = {
   end,
   hideWhenDead = function() return Boolean end,
   hideWhenOffline = function() return Boolean end,
+  unitPower = function() return ListOf(Set("MANA", "RAGE", "ENERGY", "FOCUS")) end,
   hideWhenNotVisible = function()
     return function(value, path)
       if value == "auto" or type(value) == "boolean" then

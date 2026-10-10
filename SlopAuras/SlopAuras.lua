@@ -1057,6 +1057,9 @@ local function ReadState(host)
     state.dead = UnitIsDeadOrGhost(unit)
     state.offline = not UnitIsConnected(unit)
     state.visible = UnitIsVisible(unit)
+    -- The current power, so a druid in cat or bear form reads as energy or
+    -- rage. No token for some units in a PvP match (MayReturnNothing).
+    state.power = select(2, UnitPowerType(unit))
     state.resting = IsResting()
     state.mounted = IsMounted()
     state.playerDead = UnitIsDeadOrGhost("player")
@@ -1137,6 +1140,12 @@ local function Shows(d)
     return false
   end
   if d.hideWhenDead and state.dead or d.hideWhenOffline and state.offline then
+    return false
+  end
+  -- An empty list (a display overriding its group) means any power. A unit
+  -- with no power token matches nothing.
+  local power = d.unitPower
+  if power and #power > 0 and not (state.power and tContains(power, state.power)) then
     return false
   end
   if not Wants(d.resting, state.resting) or not Wants(d.mounted, state.mounted)

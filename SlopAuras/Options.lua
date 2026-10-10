@@ -322,6 +322,9 @@ local function ClassValues()
   return values
 end
 
+-- Power tokens as UnitPowerType returns them.
+local POWER_VALUES = { MANA = "Mana", RAGE = "Rage", ENERGY = "Energy", FOCUS = "Focus" }
+
 -- `class` may be saved as one string (older saves) or a list.
 local function ClassList(value)
   if type(value) == "string" then
@@ -1017,6 +1020,24 @@ local function SharedTabs(t, isDisplay, extra)
           else
             Set("hideWhenNotVisible", value == "yes")
           end
+        end,
+      },
+      break1 = Break(3.9),
+      unitPower = {
+        type = "multiselect", order = 4, width = "full", values = POWER_VALUES,
+        name = Label("unitPower", "Power types (none ticked: any)"),
+        desc = Desc("unitPower", "Shows only on units using a ticked power. A druid in cat or bear form uses "
+          .. "energy or rage. None ticked: any power."),
+        get = function(_, item) return tContains(t.unitPower or {}, item) end,
+        -- A display keeps an empty list so it can override a group's.
+        set = function(_, item, on)
+          local list = CopyTable(t.unitPower or {})
+          if on and not tContains(list, item) then
+            table.insert(list, item)
+          elseif not on then
+            tDeleteItem(list, item)
+          end
+          Set("unitPower", (#list > 0 or isDisplay) and list or nil)
         end,
       },
     },
