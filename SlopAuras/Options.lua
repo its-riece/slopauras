@@ -552,7 +552,8 @@ local function SharedTabs(t, isDisplay, extra)
   end
 
   -- Never load decides which containers are built (SplitLines in SlopAuras.lua).
-  local STRUCTURAL = { neverLoad = true }
+  -- Keys that decide whether a display is built at all (Builds, SlopAuras.lua).
+  local STRUCTURAL = { neverLoad = true, class = true, knownSpell = true }
 
   local function Set(key, value)
     t[key] = value
@@ -910,8 +911,8 @@ local function SharedTabs(t, isDisplay, extra)
   look.args.sort.hidden = ListOnly
   look.args.sortReverse.hidden = ListOnly
 
-  -- About you and where you are. A group's classes decide whether it loads at
-  -- all (structural); a display's only hide that display.
+  -- About you and where you are. Classes and known spells decide whether a
+  -- group or display is built at all (structural).
   local you = {
     type = "group", inline = true, order = 1, name = "Your character",
     args = {
@@ -928,7 +929,7 @@ local function SharedTabs(t, isDisplay, extra)
             tDeleteItem(list, item)
           end
           t.class = list
-          Changed(not isDisplay)
+          Changed(true)
         end,
       },
       combat = {

@@ -247,6 +247,77 @@ local function ClassAllowed(t)
   return not t.class or #t.class == 0 or tContains(t.class, playerClass)
 end
 
+-- "Only if you know spell": one ID or a list; a negative ID is one that must
+-- not be known. Of the positive IDs, at least one must be known. Not secret
+-- (SpellBookDocumentation.lua has no SecretReturns on it).
+local function KnowsSpells(d)
+  local spell = d.knownSpell
+  if not spell then
+    return true
+  end
+  local wanted, known = false, false
+  for _, id in ipairs(type(spell) == "table" and spell or { spell }) do
+    if id < 0 then
+      if C_SpellBook.IsSpellKnown(-id) then
+        return false
+      end
+    else
+      wanted = true
+      known = known or C_SpellBook.IsSpellKnown(id)
+    end
+  end
+  return known or not wanted
+end
+
+-- Whether a display is built at all. Every container costs 10 buttons per
+-- aura group per host (Blizzard's FrameCreationBatchSize), so displays that
+-- can't show on this character aren't built: Never load, a class that isn't
+-- yours, a spell you don't know. Classes can't change in a session; known
+-- spells can, and WatchKnownSpells rebuilds when they do.
+local function Builds(d)
+  return not d.neverLoad and ClassAllowed(d) and KnowsSpells(d)
+end
+
+-- Every spell ID a display's "Only if you know spell" names, and whether it
+-- was known when the rows were last computed. `knownKey` lists the known ones;
+-- it's part of each row's fingerprint, so a spell learned while auras are
+-- secret rebuilds rows even when the displays that swap have the same mode.
+local knownAtBuild, knownIDs, knownKey = {}, {}, ""
+
+local function RecordKnownSpells()
+  wipe(knownAtBuild)
+  wipe(knownIDs)
+  local known = {}
+  for _, group in ipairs(ns.groups) do
+    for _, d in ns.Displays(group) do
+      local spell = d.knownSpell
+      for _, id in ipairs(type(spell) == "table" and spell or { spell }) do
+        id = math.abs(id)
+        if knownAtBuild[id] == nil then
+          knownAtBuild[id] = C_SpellBook.IsSpellKnown(id)
+          table.insert(knownIDs, id)
+          if knownAtBuild[id] then
+            table.insert(known, id)
+          end
+        end
+      end
+    end
+  end
+  knownKey = table.concat(known, ",")
+end
+
+-- Whether any of those spells has been learned or unlearned since (a level,
+-- a talent, a respec, or spells loading after login). Polled rather than
+-- event-driven so no event can be missed; a few calls per tick.
+local function KnownSpellsChanged()
+  for _, id in ipairs(knownIDs) do
+    if C_SpellBook.IsSpellKnown(id) ~= knownAtBuild[id] then
+      return true
+    end
+  end
+  return false
+end
+
 local rowConfigs = {}
 
 local OTHER_COMBAT = { ["in"] = "out", out = "in" }
@@ -256,11 +327,10 @@ local function GlowSplits(d)
   return d.glow and OTHER_COMBAT[d.glowCombat] ~= nil
 end
 
--- Whether any of the group's displays loads: Never load (inherited from the
--- group unless a display overrides it) builds nothing.
+-- Whether any of the group's displays is built (Builds).
 local function Loads(group)
   for _, display in ns.Displays(group) do
-    if not display.neverLoad then
+    if Builds(display) then
       return true
     end
   end
@@ -273,12 +343,74 @@ end
 -- so Apply compares this to catch them.
 local buildFlags = ""
 
+local function SameValue(a, b)
+  if type(a) ~= "table" or type(b) ~= "table" then
+    return a == b
+  end
+  for k, v in pairs(a) do
+    if not SameValue(v, b[k]) then
+      return false
+    end
+  end
+  for k in pairs(b) do
+    if a[k] == nil then
+      return false
+    end
+  end
+  return true
+end
+
+-- Keys two displays may differ in and still share an aura group: the name,
+-- and known spells, which already decided that both are built (Builds).
+local MERGE_IGNORES = { name = true, knownSpell = true, dispelTypes = true }
+
+-- Whether two displays' own settings match apart from MERGE_IGNORES. Both
+-- belong to one group, so what they inherit matches too.
+local function SameButDispel(a, b)
+  if not a.dispelTypes or not b.dispelTypes then
+    return false
+  end
+  for k, v in pairs(a) do
+    if not MERGE_IGNORES[k] and not SameValue(v, rawget(b, k)) then
+      return false
+    end
+  end
+  for k in pairs(b) do
+    if not MERGE_IGNORES[k] and rawget(a, k) == nil then
+      return false
+    end
+  end
+  return true
+end
+
+-- The built list displays that join the one before them on their line
+-- (MergeDispelSplits), as a set. Not for priority stacks.
+local function MergedDisplays(group)
+  local merged, base = {}, nil
+  if ns.StackDisplays(group) then
+    return merged
+  end
+  for _, d in ipairs(group.displays) do
+    if d.mode == "break" then
+      base = nil
+    elseif d.mode ~= "missing" and Builds(d) then
+      if base and SameButDispel(base, d) then
+        merged[d] = true
+      else
+        base = d
+      end
+    end
+  end
+  return merged
+end
+
 local function BuildFlags()
   local flags = {}
   for _, group in ipairs(ns.groups) do
     flags[#flags + 1] = ns.StackDisplays(group) and "s" or "-"
+    local merged = MergedDisplays(group)
     for _, display in ns.Displays(group) do
-      flags[#flags + 1] = display.skin == "masque" and "1" or "0"
+      flags[#flags + 1] = (display.skin == "masque" and "1" or "0") .. (merged[display] and "m" or "")
     end
   end
   return table.concat(flags)
@@ -291,15 +423,17 @@ local function GroupJSON(group)
   return ok and json or nil
 end
 
--- A row's signature, its group's settings and the skin epoch: while auras are
+-- A row's signature, its group's settings, the skin epoch and the known
+-- spells (knownKey): while auras are
 -- secret a row can't be restyled, only rebuilt, so any change to it means a
 -- new row (SyncHost). Without `json`, a table that matches nothing.
 local function Fingerprint(signature, json)
-  return json and (signature .. "|" .. json .. "|" .. Chain.SkinEpoch()) or {}
+  return json and (signature .. "|" .. json .. "|" .. Chain.SkinEpoch() .. "|" .. knownKey) or {}
 end
 
 local function ComputeRows()
   buildFlags = BuildFlags()
+  RecordKnownSpells()
   local rows = {}
   for _, group in ipairs(ns.groups) do
     local targets = TargetSet(group.target)
@@ -323,17 +457,20 @@ local function ComputeRows()
       local shape = table.concat(parts, "|")
       -- A break only counts between displays, as in SplitLines.
       local started, broken = false, false
+      local merged = MergedDisplays(group)
       for _, display in ipairs(group.displays) do
         if display.mode == "break" then
           broken = started
-        elseif not display.neverLoad then
+        elseif Builds(display) then
           local newLine = broken and "/" or ""
           started, broken = true, false
           -- Only Masque-style displays' buttons are registered with Masque.
           local masque = display.skin == "masque" and "+masque" or ""
           -- A combat-limited glow builds two aura groups (GlowCopies).
           local split = display.mode ~= "missing" and GlowSplits(display) and "+split" or ""
-          table.insert(parts, newLine .. display.mode .. masque .. split)
+          -- Joins the aura group before it (MergeDispelSplits).
+          local join = merged[display] and "+merged" or ""
+          table.insert(parts, newLine .. display.mode .. masque .. split .. join)
         end
       end
       if ns.StackDisplays(group) then
@@ -426,14 +563,14 @@ end
 -- Splits a group's displays into lines at its line breaks. A break before the
 -- first display, after the last or right after another makes no line.
 -- Missing-icon displays have their own frames and sit after the line's list
--- displays. `j` is the display's number (ns.Displays). Displays set to Never
--- load are left out: nothing is built for them.
+-- displays. `j` is the display's number (ns.Displays). Displays that aren't
+-- built (Builds) are left out.
 local function SplitLines(group)
   local lines, line, broken, j = {}, nil, false, 0
   for _, d in ipairs(group.displays) do
     if d.mode == "break" then
       broken = line ~= nil
-    elseif d.neverLoad then
+    elseif not Builds(d) then
       j = j + 1
     else
       if not line or broken then
@@ -612,7 +749,7 @@ local function StyleFirstLine(row)
     local clip = ns.SingleRow(group) and not ns.FirstLineConflict(group)
     local displays = {}
     for _, display in ns.Displays(group) do
-      if not display.neverLoad then
+      if Builds(display) then
         displays[#displays + 1] = display
       end
     end
@@ -642,6 +779,31 @@ local function GlowCopies(entry)
     end
   end
   return copies
+end
+
+-- Neighbouring list displays that differ only in dispel types become one
+-- aura group with the types combined: every aura group costs 10 buttons per
+-- host, and a class-agnostic config splits one row into per-type displays that
+-- only differ in which dispel spells you know. Max icons shown then counts the
+-- combined display, and its auras sort together.
+local function MergeDispelSplits(entries)
+  local merged = {}
+  for _, entry in ipairs(entries) do
+    local last = merged[#merged]
+    local base = last and (last.base or last.d)
+    if base and SameButDispel(base, entry.d) then
+      local types = CopyTable(last.d.dispelTypes)
+      for _, t in ipairs(entry.d.dispelTypes) do
+        if not tContains(types, t) then
+          table.insert(types, t)
+        end
+      end
+      merged[#merged] = { d = setmetatable({ dispelTypes = types }, { __index = base }), j = last.j, base = base }
+    else
+      merged[#merged + 1] = entry
+    end
+  end
+  return merged
 end
 
 local function ListDisplays(line)
@@ -708,7 +870,8 @@ local function AssignLines(row, host)
   end
   for _, line in ipairs(row.lines) do
     local entries = {}
-    for _, entry in ipairs(line.listDisplays) do
+    -- A stack shows one display per slot, so its displays stay separate.
+    for _, entry in ipairs(stack and line.listDisplays or MergeDispelSplits(line.listDisplays)) do
       for _, copy in ipairs(GlowCopies(entry)) do
         entries[#entries + 1] = copy
       end
@@ -1126,8 +1289,10 @@ local function Wants(want, actual)
   return want == nil or want == "any" or want == actual
 end
 
+-- Never load, class and known spells aren't checked here: displays that fail
+-- them aren't built (Builds).
 local function Shows(d)
-  if not state.shown or not ClassAllowed(d) then
+  if not state.shown then
     return false
   end
   -- d.nameplateUnits: "enemy", "friendly" or "all". Test mode shows on any
@@ -1136,7 +1301,7 @@ local function Shows(d)
         or d.nameplateUnits == "friendly" and state.hostile) then
     return false
   end
-  if d.neverLoad or d.combat == "in" and not inCombat or d.combat == "out" and inCombat then
+  if d.combat == "in" and not inCombat or d.combat == "out" and inCombat then
     return false
   end
   if d.hideWhenDead and state.dead or d.hideWhenOffline and state.offline then
@@ -1152,27 +1317,6 @@ local function Shows(d)
       or d.hideWhenPlayerDead and state.playerDead then
     return false
   end
-  -- Not secret (SpellBookDocumentation.lua has no SecretReturns on it).
-  -- One ID or a list; a negative ID is one that must not be known. Of the
-  -- positive IDs, at least one must be known.
-  local spell = d.knownSpell
-  if spell then
-    local wanted, known = false, false
-    for _, id in ipairs(type(spell) == "table" and spell or { spell }) do
-      if id < 0 then
-        if C_SpellBook.IsSpellKnown(-id) then
-          return false
-        end
-      else
-        wanted = true
-        known = known or C_SpellBook.IsSpellKnown(id)
-      end
-    end
-    if wanted and not known then
-      return false
-    end
-  end
-
   -- Beyond the visible range, flag tokens and PLAYER match the wrong auras;
   -- spell-ID filters stay correct.
   local notVisible = d.hideWhenNotVisible
@@ -1270,6 +1414,9 @@ function UpdateAll()
       ns.OnTestEnded() -- closes the test window
     end
     return -- SyncTesting ran UpdateAll
+  end
+  if KnownSpellsChanged() then
+    ns.Changed(true) -- builds or drops the displays that depend on them
   end
   if refake then
     refake = false

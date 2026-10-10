@@ -148,8 +148,21 @@ below.
   one spot, earlier displays on top, so it shows what the first-line window would.
   Whether a group qualifies is part of `BuildFlags`, since the edits that change it (Max
   icons shown, icon size) are sent as look changes.
-- **Never load** displays aren't built (`SplitLines` leaves them out); turning it on or off
-  is structural.
+- **Displays that can't show on this character aren't built** (`Builds`: Never load, a
+  class that isn't yours, "Only if you know spell" not met; `SplitLines` leaves them out).
+  Each aura group costs 10 buttons per host whether it shows or not
+  (`FrameCreationBatchSize`), so a hidden-but-built display is expensive on raid frames.
+  Changing any of those three keys is structural. Known spells can change in a session: the
+  poll compares them with the last build (`KnownSpellsChanged`) and applies a structural
+  change when one is learned or unlearned (level, talent, respec, spells loading after
+  login). `knownKey` is part of each row's fingerprint so that works while auras are secret.
+- **Dispel-type splits merge** (`MergeDispelSplits`, not in priority stacks): neighbouring
+  built list displays on a line whose own settings match except `name`, `knownSpell` and
+  `dispelTypes` become one aura group with the types combined. A class-agnostic config
+  splits a row per dispel type with different known spells; once `Builds` drops the types
+  you can dispel, the rest would otherwise cost 10 buttons each. Max icons shown then
+  counts the merged display. `MergedDisplays` puts the merge state in `BuildFlags` and the
+  row signature, so an edit that makes two displays differ splits them again.
 - **Wrapping lines** (`wrap` on the display that starts a line): the container's flow layout
   wraps by length (`Chain.SetWrap`), so the next line follows its last row. Only for lines
   without missing displays, in groups not showing only their first line, whose strands are
@@ -203,8 +216,9 @@ below.
   stay in memory until `/reload`. Past `RELOAD_HINT` retired containers, the editor
   suggests a reload.
 - `UpdateAll` polls the **conditions** (combat, resting, mounted, dead, offline, visible,
-  hostility, known spells...) every 0.25s, because several have no event. Frames change
-  only when a result changes.
+  hostility, power type...) every 0.25s, because several have no event. Frames change
+  only when a result changes. Class and known spells aren't polled per display: they
+  decide what's built (above).
 
 ## The editor (Options.lua)
 
