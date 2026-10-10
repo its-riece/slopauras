@@ -2,12 +2,12 @@
 
 <table>
   <tr>
-    <td><a href="screenshots/group.png"><img src="screenshots/group.png" height="260"></a></td>
-    <td><a href="screenshots/placement.png"><img src="screenshots/placement.png" height="260"></a></td>
+    <td><a href="screenshots/filters.png"><img src="screenshots/filters.png" height="260"></a></td>
+    <td><a href="screenshots/appearance.png"><img src="screenshots/appearance.png" height="260"></a></td>
   </tr>
   <tr>
-    <td><a href="screenshots/display-appearance.png"><img src="screenshots/display-appearance.png" height="260"></a></td>
     <td><a href="screenshots/load-conditions.png"><img src="screenshots/load-conditions.png" height="260"></a></td>
+    <td><a href="screenshots/layout.png"><img src="screenshots/layout.png" height="260"></a></td>
   </tr>
 </table>
 
