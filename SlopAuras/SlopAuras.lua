@@ -360,9 +360,10 @@ local function SameValue(a, b)
   return true
 end
 
--- Keys two displays may differ in and still share an aura group: the name,
--- and known spells, which already decided that both are built (Builds).
-local MERGE_IGNORES = { name = true, knownSpell = true, dispelTypes = true }
+-- Keys two displays may differ in and still share an aura group: the name;
+-- known spells, which already decided that both are built (Builds); and the
+-- line's settings, which only the display starting the line holds (SplitLines).
+local MERGE_IGNORES = { name = true, knownSpell = true, dispelTypes = true, wrap = true }
 
 -- Whether two displays' own settings match apart from MERGE_IGNORES. Both
 -- belong to one group, so what they inherit matches too.
@@ -579,15 +580,18 @@ end
 -- displays. `j` is the display's number (ns.Displays). Displays that aren't
 -- built (Builds) are left out.
 local function SplitLines(group)
-  local lines, line, broken, j = {}, nil, false, 0
+  -- lead: the display that starts the line in the list, built or not; it
+  -- holds the line's settings (wrap), which the editor shows there.
+  local lines, line, broken, j, lead = {}, nil, false, 0, nil
   for _, d in ipairs(group.displays) do
     if d.mode == "break" then
-      broken = line ~= nil
+      broken, lead = line ~= nil, nil
     elseif not Builds(d) then
-      j = j + 1
+      j, lead = j + 1, lead or d
     else
+      lead = lead or d
       if not line or broken then
-        line, broken = { listDisplays = {}, missingDisplays = {} }, false
+        line, broken = { listDisplays = {}, missingDisplays = {}, lead = lead }, false
         table.insert(lines, line)
       end
       j = j + 1
@@ -613,10 +617,10 @@ end
 -- icons chain after the first row, and the line's height is fixed), and so
 -- does a group showing only its first line.
 local function LineWrap(group, line)
-  if #line.missingDisplays > 0 or group.firstLine or not ns.SingleRow(group) then
+  if #line.missingDisplays > 0 or group.firstLine or not ns.SingleRow(group) or not line.lead then
     return nil
   end
-  return line.listDisplays[1].d.wrap
+  return line.lead.wrap
 end
 
 -- How far a line reaches across: its biggest icon plus the line spacing.

@@ -164,7 +164,10 @@ below.
   you can dispel, the rest would otherwise cost 10 buttons each. Max icons shown then
   counts the merged display. `MergedDisplays` puts the merge state in `BuildFlags` and the
   row signature, so an edit that makes two displays differ splits them again.
-- **Wrapping lines** (`wrap` on the display that starts a line): the container's flow layout
+- **Line settings** (`wrap`) live on the display that starts the line in the
+  list, built or not (`line.lead`, `SplitLines`), which is where the editor shows them.
+  `SameButDispel` ignores them, so they don't stop a merge.
+- **Wrapping lines** (`wrap`): the container's flow layout
   wraps by length (`Chain.SetWrap`), so the next line follows its last row. Only for lines
   without missing displays, in groups not showing only their first line, whose strands are
   a single row (`ns.SingleRow`, `LineWrap`): other lines keep a fixed height.
