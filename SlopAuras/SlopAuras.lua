@@ -1832,11 +1832,11 @@ end
 -- Nameplates -----------------------------------------------------------------
 -- The game reuses a small set of nameplate frames for whichever units are
 -- nearby. A host is tied to a plate frame the first time it appears and stays
--- there, so its rows are anchored once per plate frame. Plates often
--- appear in combat, when containers can't be built, so every host is built at
--- login: one per nameplate unit token (nameplate1-40), the most plates there
--- can be at once. Idle hosts cost memory but no CPU (a disabled container
--- drops its UNIT_AURA registration).
+-- there, so its rows are anchored once per plate frame. Every host is built at
+-- login, behind the loading screen, so plates appearing later (often several
+-- at once on a pull) build nothing: one per nameplate unit token
+-- (nameplate1-40), the most plates there can be at once. Idle hosts cost
+-- memory but no CPU (a disabled container drops its UNIT_AURA registration).
 
 local MAX_PLATES = 40
 local plateHosts = {} -- nameplate frame -> its host
@@ -1919,9 +1919,8 @@ CreateFrame("Frame"):SetScript("OnUpdate", function()
   end
 end)
 
--- Binds plates that were already up before we were built. Only matters when
--- building had to wait for auras to stop being secret: on a combat /reload
--- they aren't secret yet at login, so we build first and plates come after.
+-- Binds plates that were already up when Build ran: NAME_PLATE_UNIT_ADDED is
+-- ignored until then.
 local function CatchUpPlates()
   for i = 1, MAX_PLATES do
     local unit = "nameplate" .. i
