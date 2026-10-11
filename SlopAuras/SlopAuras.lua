@@ -501,30 +501,39 @@ local function FindFrame(path)
   return frame
 end
 
--- Blizzard's own unit frames, for "each unit's own frame" on single units.
--- Party, raid and nameplate hosts carry their frame themselves (host.frame).
-local UNIT_FRAMES = { player = "PlayerFrame", target = "TargetFrame", focus = "FocusFrame" }
+-- Units that are one person each, with a frame of their own.
+local SINGLE_UNITS = { player = true, target = true, focus = true }
 
 -- The frame a row is anchored to, and whether it was found. A frame that
--- doesn't exist yet leaves the row on the screen, retried later.
+-- doesn't exist yet leaves the row on the screen, retried later. A unit with
+-- no frame (host.frame nil) hides its unit-anchored rows (UpdateHost).
 local function AnchorFrame(leader, host)
   if leader.anchorTo == "frame" then
     local frame = FindFrame((leader.anchor or {})[2] or "")
     return frame or UIParent, frame ~= nil
-  elseif leader.anchorTo == "unit" then
-    if host.frame then
-      return host.frame, true
-    elseif UNIT_FRAMES[host.kind] then
-      local frame = _G[UNIT_FRAMES[host.kind]]
-      return frame or UIParent, frame ~= nil
-    end
-    -- A nameplate host not tied to a plate yet: placed when it is.
+  elseif leader.anchorTo == "unit" and host.frame then
+    return host.frame, true
   end
   return UIParent, true
 end
 
+-- What a row's origin is a child of, or nil to leave it where it is. On a
+-- party or raid frame it's a child of the frame, so it's raised with it
+-- (clicking raises a party frame) and hidden with it, whatever it's anchored
+-- to. You, target and focus put only rows anchored to their frame there:
+-- their other rows show whether or not the frame does. Nameplates: see
+-- FollowPlate.
+local function RowParent(row, host)
+  if host.kind == "nameplate" or SINGLE_UNITS[host.kind] and row.group.anchorTo ~= "unit" then
+    return UIParent
+  end
+  return host.frame
+end
+
 -- Positions a row's origin from its group's anchor and sets its frame level.
--- Returns false while the frame it names doesn't exist yet.
+-- Returns false while the frame it names doesn't exist yet. Also moves the
+-- row to a new frame (SetHostFrame), which the game allows in combat and
+-- while auras are secret.
 --
 -- The level: 10 above the parent clears a unit frame's health bar and
 -- borders. Rows on one frame share its strata, and equal levels draw in no
@@ -536,6 +545,10 @@ local function PlaceOrigin(row, host)
   local point = anchor[1] or "CENTER"
   local relativeTo, found = AnchorFrame(row.group, host)
 
+  local parent = RowParent(row, host)
+  if parent and row.origin:GetParent() ~= parent then
+    row.origin:SetParent(parent)
+  end
   row.origin:SetFrameLevel(row.origin:GetParent():GetFrameLevel() + 10 + row.group.layer * 10)
   row.origin:ClearAllPoints()
   row.origin:SetPoint(point, relativeTo, anchor[3] or point, anchor[4] or 0, anchor[5] or 0)
@@ -587,8 +600,6 @@ end
 -- Whether every strand of the group's rows is a single row (Strand): on each
 -- unit's own frame, or one single unit. Lines in longer strands keep a fixed
 -- height (PlaceLine), so they can't wrap.
-local SINGLE_UNITS = { player = true, target = true, focus = true }
-
 function ns.SingleRow(group)
   if group.anchorTo == "unit" then
     return true
@@ -938,12 +949,10 @@ local function BuildRow(config, host)
     fingerprint = config.fingerprint,
   }
 
-  -- Everything in the row hangs off this 1px frame. On a unit frame it's a
-  -- child of that frame, so it's raised with it (clicking raises a party
-  -- frame) and hidden with it. Not on nameplates: see FollowPlate. PlaceOrigin
-  -- sets its level, before our children are created: they start one level
-  -- above their parent.
-  row.origin = CreateFrame("Frame", nil, host.kind ~= "nameplate" and host.frame or UIParent)
+  -- Everything in the row hangs off this 1px frame. PlaceOrigin gives it its
+  -- parent (RowParent) and level, before our children are created: they
+  -- start one level above their parent.
+  row.origin = CreateFrame("Frame", nil, RowParent(row, host) or UIParent)
   row.origin:SetSize(1, 1)
   if not PlaceOrigin(row, host) then
     table.insert(unresolved, { row = row, host = host })
@@ -1209,10 +1218,13 @@ local inCombat = false
 -- them), so Lua can decide and simply leave the display out of the chain.
 local state = {}
 
+-- Hosts that only show on a frame: their rows are its children.
+local FRAMED = { party = true, partypet = true, raid = true, raidpet = true, nameplate = true }
+
 local function ReadState(host)
   local unit = host.unit
   state.shown = unit ~= nil and UnitExists(unit)
-      and not (host.frame and not host.frame:IsVisible())
+      and not (FRAMED[host.kind] and not (host.frame and host.frame:IsVisible()))
   state.plate = host.kind == "nameplate"
   if state.shown then
     -- Polled, so a duel starting or a mind control is noticed too.
@@ -1369,7 +1381,7 @@ local function UpdateHost(host, relink)
   ReadState(host)
   for _, row in ipairs(host.rows) do
     local changed, showing = relink, false
-    local off = testing and not testGroups[row.group]
+    local off = testing and not testGroups[row.group] or row.group.anchorTo == "unit" and not host.frame
     for _, line in ipairs(row.lines) do
       changed = UpdateLine(line, off) or changed
       showing = showing or (line.list and line.list.active) or false
@@ -1454,127 +1466,300 @@ local function SetHostUnit(host, unit)
   UpdateHost(host)
 end
 
--- Party and raid -------------------------------------------------------------
--- One host per Blizzard compact party or raid frame, members and pets. When
--- Blizzard gives the frame a new unit, the host's containers follow. In a raid Blizzard hides
--- the party frame (ShouldShowPartyFrames, GroupFrameVisibility.lua), so
--- party-only displays hide there.
+-- Unit frames ----------------------------------------------------------------
+-- A host belongs to a unit token (player, party1, raid7, partypet2...). Its
+-- rows sit on whatever frame shows that unit, Blizzard's or another addon's
+-- (Grid2, ElvUI, VuhDo...), and move when the unit's frame changes. Party and
+-- raid hosts show only while their unit has a visible frame.
+--
+-- Frames come from LibGetFrame. It keeps a list of every visible unit button,
+-- made by walking the UI after group, pet and combat events (about a second
+-- later), but reads each listed frame's unit when asked. So when Blizzard or
+-- Grid2 give a frame a new unit, the hooks below look again at once and ask
+-- for a new list, which picks up frames that just appeared.
 
-local partyHosts = {} -- party or party pet unit frame -> its host
-local raidHosts = {} -- raid or raid pet unit frame -> its host
+local LGF = LibStub("LibGetFrame-1.0")
 
--- Raid frames are created on demand, in two layouts (Blizzard_CompactRaidFrames):
---   grouped:   CompactRaidGroup1Member1 .. CompactRaidGroup8Member5
---   flat list: CompactRaidFrame1, 2, ... These also show pets and main tank
---              targets; frameType tells them apart. Pets are flat in both
---              layouts (AddPets). Each frameType has its own frame pool
---              (frameReservations), so a frame keeps its kind. "raidFake"
---              frames are Edit Mode's raid preview (unit "player" or a party
---              member), so raid groups can be previewed there.
-local FLAT_KINDS = { raid = "raid", flagged = "raid", raidFake = "raid", pet = "raidpet" }
+-- The units with a host, by kind. Your own pet is "pet".
+local GROUP_UNITS = { party = { "player" }, partypet = { "pet" }, raid = {}, raidpet = {} }
+for i = 1, 4 do
+  table.insert(GROUP_UNITS.party, "party" .. i)
+  table.insert(GROUP_UNITS.partypet, "partypet" .. i)
+end
+for i = 1, 40 do
+  table.insert(GROUP_UNITS.raid, "raid" .. i)
+  table.insert(GROUP_UNITS.raidpet, "raidpet" .. i)
+end
 
--- "raid", "raidpet", or nil for anything else. The CompactUnitFrame_SetUnit
--- hook also sees forbidden nameplate frames (friendly plates in instances);
--- IsForbidden is the one method they allow.
-local function RaidFrameKind(frame)
-  if frame:IsForbidden() then
-    return nil
-  end
+local singleHosts = {} -- "player" / "target" / "focus" -> host
+local unitHosts = {} -- party or raid unit token -> host
+local previewHosts = {} -- preview frame -> host (see Previews below)
+
+-- Lookups return every frame found (returnAll). LibGetFrame's defaults leave
+-- player, target and focus frames out of group lookups; single lookups leave
+-- party and raid frames out.
+local GROUP_LOOKUP = { returnAll = true }
+local SINGLE_LOOKUP = {
+  returnAll = true, ignorePlayerFrame = false, ignoreTargetFrame = false, ignoreFocusFrame = false,
+  ignorePartyFrame = true, ignoreRaidFrame = true, ignoreBossFrame = true,
+}
+
+-- Frame names, from LibGetFrame's lists (frame addons add theirs there).
+-- `accepted[kind]`: a frame must match one to count for that kind; group units
+-- take party and raid frames only, so a pet group stays off pet frames like
+-- PetFrame that also show "pet". `ranking[kind]`: best first, so a unit shown
+-- by two frame addons gets the one ranked first.
+local accepted, ranking = {}, {}
+local partyPatterns -- party frames, for previews
+
+local function Rank(frame, patterns)
   local name = frame:GetName()
-  if not name then
+  if name then
+    for i, pattern in ipairs(patterns) do
+      if name:find(pattern) then
+        return i
+      end
+    end
+  end
+  return #patterns + 1
+end
+
+-- The unit a frame shows, as LibGetFrame reads it (SecureTemplates.lua).
+local GetFrameUnit = _G.SecureButton_GetUnit
+
+local function ShowsUnit(frame, unit)
+  local shown = frame and GetFrameUnit(frame)
+  return shown ~= nil and not issecretvalue(shown) and shown == unit
+end
+
+local function Accepts(kind, frame)
+  return Rank(frame, accepted[kind]) <= #accepted[kind]
+end
+
+-- The frames LibGetFrame lists for `unit` that show exactly that token and
+-- are accepted for `kind`. Its lookup also counts a frame showing the same
+-- person under another token (a raid frame for "party1"), which would put
+-- party rows on raid frames.
+local function UnitFrames(kind, unit)
+  local found = {}
+  local lookup = SINGLE_UNITS[kind] and SINGLE_LOOKUP or GROUP_LOOKUP
+  for frame in pairs(LGF.GetUnitFrame(unit, lookup) or {}) do
+    if ShowsUnit(frame, unit) and Accepts(kind, frame) then
+      table.insert(found, frame)
+    end
+  end
+  return found
+end
+
+-- The best frame showing `unit`, or nil.
+local function FindUnitFrame(kind, unit)
+  if not UnitExists(unit) then
     return nil
   end
-  if name:match("^CompactRaidGroup%d+Member%d+$") then
-    return "raid"
+  local best, bestRank
+  for _, frame in ipairs(UnitFrames(kind, unit)) do
+    local rank = Rank(frame, ranking[kind])
+    if not best or rank < bestRank then
+      best, bestRank = frame, rank
+    end
   end
-  if name:match("^CompactRaidFrame%d+$") then
-    return FLAT_KINDS[frame.frameType]
+  return best
+end
+
+-- Moves a host's rows to `frame`.
+local function SetHostFrame(host, frame)
+  if host.frame == frame then
+    return
+  end
+  host.frame = frame
+  for _, row in ipairs(host.rows) do
+    PlaceOrigin(row, host)
+  end
+  UpdateHost(host, true)
+end
+
+-- A frame that's out of LibGetFrame's list (it only lists visible frames:
+-- a target frame while you have no target) is kept while it still shows the
+-- unit; its rows hide with it.
+local function BestFrame(kind, unit, host)
+  local frame = FindUnitFrame(kind, unit)
+  if not frame and host and ShowsUnit(host.frame, unit) then
+    frame = host.frame
+  end
+  return frame
+end
+
+-- Unit hosts are made the first time their unit has a frame, a few per frame
+-- within a time budget (QueueHost below): a host builds every group's rows
+-- for its kind (each aura group makes 10 buttons up front), and joining a raid
+-- finds up to 40 units at once: built together, the game froze.
+local function AddUnitHost(unit, kind)
+  if not unitHosts[unit] then
+    unitHosts[unit] = NewHost(kind, unit, FindUnitFrame(kind, unit))
+    UpdateHost(unitHosts[unit])
   end
 end
 
-local function AddRaidHost(frame, kind)
-  if not raidHosts[frame] then
-    raidHosts[frame] = NewHost(kind, frame.unit, frame)
-    UpdateHost(raidHosts[frame])
-  end
-end
-
--- Raid frames seen for the first time wait here and get their hosts a few per
--- frame, within a time budget. A host builds every raid group's rows (each aura
--- group makes 10 buttons up front), and joining a raid or opening Edit Mode's
--- raid preview hands out up to 40 frames at once: built together, the game
--- froze.
 local BUILD_BUDGET_MS = 4
-local raidQueue, queued = {}, {}
+local hostQueue, queued = {}, {} -- queued: key -> kind
 local builder = CreateFrame("Frame")
 builder:Hide()
 builder:SetScript("OnUpdate", function(self)
   local start = debugprofilestop()
   repeat
-    local entry = table.remove(raidQueue, 1)
-    queued[entry.frame] = nil
-    AddRaidHost(entry.frame, entry.kind)
-  until #raidQueue == 0 or debugprofilestop() - start > BUILD_BUDGET_MS
-  if #raidQueue == 0 then
+    local entry = table.remove(hostQueue, 1)
+    if queued[entry.key] == entry.kind then
+      queued[entry.key] = nil
+    end
+    entry.add(entry.key, entry.kind)
+  until #hostQueue == 0 or debugprofilestop() - start > BUILD_BUDGET_MS
+  if #hostQueue == 0 then
     self:Hide()
   end
 end)
 
-local function QueueRaidHost(frame, kind)
-  if not queued[frame] and not raidHosts[frame] then
-    queued[frame] = true
-    table.insert(raidQueue, { frame = frame, kind = kind })
+-- `add(key, kind)` makes the host.
+local function QueueHost(key, kind, add)
+  if queued[key] ~= kind then
+    queued[key] = kind
+    table.insert(hostQueue, { key = key, kind = kind, add = add })
     builder:Show()
   end
 end
 
--- Raid frames that already exist, e.g. after a /reload in a raid.
-local function ScanRaidFrames()
-  for group = 1, 8 do
-    for member = 1, 5 do
-      local frame = _G["CompactRaidGroup" .. group .. "Member" .. member]
-      if frame and frame.unit then
-        AddRaidHost(frame, "raid")
-      end
-    end
-  end
-  local i = 1
-  while _G["CompactRaidFrame" .. i] do
-    local frame = _G["CompactRaidFrame" .. i]
-    local kind = frame.unit and RaidFrameKind(frame)
-    if kind then
-      AddRaidHost(frame, kind)
-    end
-    i = i + 1
+-- Previews: Edit Mode's party and raid frames and Grid2's test mode fill
+-- their empty slots with unit "player" (CompactPartyFrame.lua:176, Grid2's
+-- SetupTestMode in GridGroupHeaders.lua). While the game shows placeholder
+-- auras (Edit Mode or test mode), each such frame gets a host of its own
+-- showing the rows of a real member: party rows on party frames, raid rows
+-- on the rest. Your own frame keeps its party host.
+
+local function PreviewKind(frame)
+  return Rank(frame, partyPatterns) <= #partyPatterns and "party" or "raid"
+end
+
+local function AddPreviewHost(frame, kind)
+  if placeholders and not previewHosts[frame] then
+    previewHosts[frame] = NewHost(kind, "player", frame)
+    UpdateHost(previewHosts[frame])
   end
 end
 
-local built = false
-
-hooksecurefunc("CompactUnitFrame_SetUnit", function(frame, unit)
-  local host = partyHosts[frame] or raidHosts[frame]
-  if host then
-    SetHostUnit(host, unit)
-  elseif built and unit then
-    local kind = RaidFrameKind(frame)
-    if kind then
-      QueueRaidHost(frame, kind)
+local function SyncPreviews()
+  local own = unitHosts.player and unitHosts.player.frame
+  local wanted = {}
+  if placeholders then
+    for _, frame in ipairs(UnitFrames("raid", "player")) do
+      if frame ~= own then
+        wanted[frame] = true
+        if not previewHosts[frame] then
+          QueueHost(frame, PreviewKind(frame), AddPreviewHost)
+        end
+      end
     end
+  end
+  for frame, host in pairs(previewHosts) do
+    local unit = wanted[frame] and "player" or nil
+    if host.unit ~= unit then
+      SetHostUnit(host, unit)
+    end
+  end
+end
+
+-- Gives every host the frame showing its unit now.
+local function Rebind()
+  Batch(function()
+    for kind, host in pairs(singleHosts) do
+      SetHostFrame(host, BestFrame(kind, kind, host))
+    end
+    for kind, units in pairs(GROUP_UNITS) do
+      for _, unit in ipairs(units) do
+        local host = unitHosts[unit]
+        local frame = BestFrame(kind, unit, host)
+        if host then
+          SetHostFrame(host, frame)
+        elseif frame then
+          QueueHost(unit, kind, AddUnitHost)
+        end
+      end
+    end
+    SyncPreviews()
+  end)
+end
+
+local built = false
+local rebindQueued = false
+
+-- Rebinds on the next frame, once however many requests come in. `scan`:
+-- frames may have appeared, so LibGetFrame lists them again (it coalesces
+-- requests itself) and its GETFRAME_REFRESH rebinds once more.
+local function RequestRebind(scan)
+  if not built then
+    return
+  end
+  if scan then
+    LGF.ScanForUnitFrames()
+  end
+  if not rebindQueued then
+    rebindQueued = true
+    C_Timer.After(0, function()
+      rebindQueued = false
+      Rebind()
+    end)
+  end
+end
+
+-- Blizzard's party and raid frames, including Edit Mode's previews. The hook
+-- also sees nameplate unit frames (forbidden ones in instances allow only
+-- IsForbidden), which don't need a scan.
+hooksecurefunc("CompactUnitFrame_SetUnit", function(frame)
+  if frame:IsForbidden() then
+    return
+  end
+  local name = frame:GetName()
+  if name and (name:find("^CompactParty") or name:find("^CompactRaid")) then
+    RequestRebind(true)
   end
 end)
 
-local function BuildParty()
-  if next(partyHosts) or not CompactPartyFrame then
-    return
+local function WatchFrames()
+  accepted.player = LGF.getDefaultPlayerFrames()
+  accepted.target = LGF.getDefaultTargetFrames()
+  accepted.focus = LGF.getDefaultFocusFrames()
+  for kind in pairs(SINGLE_UNITS) do
+    ranking[kind] = accepted[kind]
   end
-  for _, frame in ipairs(CompactPartyFrame.memberUnitFrames) do
-    partyHosts[frame] = NewHost("party", frame.unit, frame)
+  partyPatterns = LGF.getDefaultPartyFrames()
+  local groupFrames, order = LGF.getDefaultRaidFrames(), LGF.getDefaultFramePriorities()
+  for _, pattern in ipairs(partyPatterns) do
+    table.insert(groupFrames, pattern)
   end
-  -- Pet1-5 under the members (CompactPartyFrame.xml); no unit while pets are hidden.
-  for _, frame in ipairs(CompactPartyFrame.petUnitFrames) do
-    partyHosts[frame] = NewHost("partypet", frame.unit, frame)
+  for kind in pairs(GROUP_UNITS) do
+    accepted[kind], ranking[kind] = groupFrames, order
   end
-  UpdateAll()
+  LGF.RegisterCallback(ns, "GETFRAME_REFRESH", function()
+    RequestRebind(false)
+  end)
+  -- Grid2 routes every unit change on its frames through SetFrameUnit
+  -- (GridFrame.lua), test mode included.
+  local grid2 = _G.Grid2
+  if grid2 and grid2.SetFrameUnit then
+    hooksecurefunc(grid2, "SetFrameUnit", function()
+      RequestRebind(true)
+    end)
+  end
+  -- LibGetFrame starts listing frames on its first lookup.
+  LGF.GetUnitFrame("player")
+  Rebind()
+end
+
+-- Every host on a party or raid frame.
+local function EachGroupHost(fn)
+  for _, list in ipairs({ unitHosts, previewHosts }) do
+    for _, host in pairs(list) do
+      fn(host)
+    end
+  end
 end
 
 -- Nameplates -----------------------------------------------------------------
@@ -1807,48 +1992,34 @@ end
 
 -- Setup ----------------------------------------------------------------------
 
-local singleHosts = {} -- "target" / "focus" -> host
-
 -- "party1" or "raid7" may now be someone else. Containers don't notice, so
 -- refresh them. In a raid GROUP_ROSTER_UPDATE comes in bursts, so wait for it
--- to settle and refresh once. (We can't refresh only the frames whose person
--- changed: UnitGUID can be secret, SecretWhenUnitIdentityRestricted.)
+-- to settle and refresh once. (We can't refresh only the units whose person
+-- changed: UnitGUID can be secret, SecretWhenUnitIdentityRestricted.) Frames
+-- may show other units now too.
 local rosterRefreshQueued = false
 
 local function RefreshGroupHosts()
   rosterRefreshQueued = false
-  for _, host in pairs(partyHosts) do
-    RefreshHost(host)
-  end
-  for _, host in pairs(raidHosts) do
-    RefreshHost(host)
-  end
+  EachGroupHost(RefreshHost)
+  RequestRebind(false)
 end
 
 local function Build()
   SyncSkins()
   rowConfigs = ComputeRows()
-  NewHost("player", "player")
-  singleHosts.target = NewHost("target", "target")
-  singleHosts.focus = NewHost("focus", "focus")
-
-  -- Blizzard creates the party frames on demand, maybe after us.
-  BuildParty()
-  if CompactPartyFrame_Generate then
-    hooksecurefunc("CompactPartyFrame_Generate", function()
-      BuildParty()
-    end)
+  for _, kind in ipairs({ "player", "target", "focus" }) do
+    singleHosts[kind] = NewHost(kind, kind)
   end
-  -- Raid frames get theirs as Blizzard hands them units (the hook above).
-  ScanRaidFrames()
 
   BuildPlateHosts()
   CatchUpPlates()
 
+  built = true
+  WatchFrames()
   UpdateAll()
   -- Polled: some conditions (visible range, mounting, turning hostile) have no event.
   C_Timer.NewTicker(0.25, UpdateAll)
-  built = true
   ns.InitOptions()
 end
 
@@ -1897,6 +2068,7 @@ events:SetScript("OnEvent", function(_, event, arg, arg2)
     OnPlateRemoved(arg)
   elseif event == "AURA_DATA_PROVIDER_SWITCH" then
     placeholders = not arg -- arg: useRealDataProvider
+    RequestRebind(true) -- previews come or go
   elseif event == "ADDON_LOADED" then
     if arg == addonName then
       LoadSettings()
@@ -1957,13 +2129,15 @@ events:SetScript("OnEvent", function(_, event, arg, arg2)
         ns.OnLockChanged()
       end
     end)
-  elseif event == "PLAYER_TARGET_CHANGED" then
-    if singleHosts.target then
-      RefreshHost(singleHosts.target)
-    end
-  elseif event == "PLAYER_FOCUS_CHANGED" then
-    if singleHosts.focus then
-      RefreshHost(singleHosts.focus)
+  elseif event == "PLAYER_TARGET_CHANGED" or event == "PLAYER_FOCUS_CHANGED" then
+    local host = singleHosts[event == "PLAYER_TARGET_CHANGED" and "target" or "focus"]
+    if host then
+      RefreshHost(host)
+      -- Its frame was hidden with no unit, so out of LibGetFrame's list
+      -- until it's listed again. Once found it's kept (BestFrame).
+      if not host.frame then
+        RequestRebind(true)
+      end
     end
   elseif event == "GROUP_ROSTER_UPDATE" then
     if not rosterRefreshQueued then
@@ -1972,12 +2146,10 @@ events:SetScript("OnEvent", function(_, event, arg, arg2)
     end
   elseif event == "UNIT_PET" then
     -- "partypet1" or "raidpet7" may now be a different pet.
-    for _, list in ipairs({ partyHosts, raidHosts }) do
-      for _, host in pairs(list) do
-        if host.kind == "partypet" or host.kind == "raidpet" then
-          RefreshHost(host)
-        end
+    EachGroupHost(function(host)
+      if host.kind == "partypet" or host.kind == "raidpet" then
+        RefreshHost(host)
       end
-    end
+    end)
   end
 end)

@@ -1919,8 +1919,8 @@ local function LayoutTab(group)
       anchorTo = {
         type = "select", order = 4, name = "Anchor to",
         values = { unit = "Each unit's own frame", screen = "Screen", frame = "A named frame" },
-        desc = "Each unit's own frame: PlayerFrame, TargetFrame or FocusFrame for you, your target and your focus; "
-            .. "raid-style frames for party and raid members and their pets; nameplates for units with one.",
+        desc = "Each unit's own frame: the frame that shows the unit, from Blizzard or an addon like Grid2 or ElvUI, "
+            .. "or the unit's nameplate. Units without a frame show no icons.",
         get = function() return group.anchorTo end,
         set = function(_, value)
           group.anchorTo = value

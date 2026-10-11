@@ -25,7 +25,7 @@ Visibility filtering is pretty good: class, combat state, spells you do or don't
 
 Appearance settings are somewhat limited but hopefully cover most of what you're used to. Desaturation, tints, glows and that kinda stuff is all there.
 
-Displays can be anchored automatically to pretty much any unit frame-- raid frames, party frames, nameplates, etc. For now assumes you're using default unit frames, but support for at minimum Grid2 is likely in the future.
+Displays can be anchored automatically to pretty much any unit frame-- raid frames, party frames, nameplates, etc.
 
 `/slop` opens settings and you should be good to go. Import/export is everywhere you'd need, full configs to specific displays.
 
@@ -66,4 +66,5 @@ SlopAuras:1:group:{"name":"purgeable buffs","target":["nameplate"],"anchorTo":"u
 - Spell rank data from [talentsforever.com](https://talentsforever.com), used under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 - Settings UI built on [Ace3](https://github.com/WoWUIDev/Ace3).
 - Fonts from [LibSharedMedia-3.0](https://www.curseforge.com/wow/addons/libsharedmedia-3-0), used under the LGPL v2.1.
+- Unit frame lookup from [LibGetFrame](https://github.com/mrbuds/LibGetFrame), used under the GPL v2.
 - Bipp Glizzitor (Beta Tester)

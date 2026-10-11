@@ -16,7 +16,7 @@ Load order is the `.toc` order.
 
 | File | What it does |
 |---|---|
-| `Libs/` | LibStub, CallbackHandler, AceGUI-3.0, AceConfig-3.0 (editor only), LibSharedMedia-3.0 (fonts, LGPL v2.1). |
+| `Libs/` | LibStub, CallbackHandler, AceGUI-3.0, AceConfig-3.0 (editor only), LibSharedMedia-3.0 (fonts, LGPL v2.1), LibGetFrame-1.0 (unit frames, GPL v2; ForeverAuras' MINOR 79, which skips aura containers when scanning). |
 | `Ranks.lua` | Spell rank families (class spells), generated from talentsforever.com data (CC BY 4.0, credited in the file). Regenerate rather than hand-edit. `ns.SpellRanks(id)`. |
 | `Chain.lua` | Builds a group's lines out of AuraContainers and links them; buttons, borders, glow, missing icons. No saved-data knowledge beyond a display's keys. |
 | `SlopAuras.lua` | Saved settings and inheritance (`DEFAULTS`, `ns.Prepare`), rows and hosts, show/hide conditions, applying editor changes, events. |
@@ -122,8 +122,9 @@ Wording: the editor calls a line a **row**, or a **column** when icons grow up o
 always a "line break". In the code, "line" is a line and "row" is one group on one host, as
 below.
 
-- **Host:** one unit's place on screen (player, target, focus, each party or raid
-  frame, members and pets, each nameplate). Every host gets its own copy of each row meant for it.
+- **Host:** one unit's place on screen: you, target, focus, each party or raid unit token
+  (members and pets), each nameplate, and preview frames (see "Unit frames"). Every host
+  gets its own copy of each row meant for it.
 - **Row:** one group on one host. **Line:** one AuraContainer with one aura group per list
   display on it; its flow layout gives each display its own icon size and collapses empty
   ones. The container is 1px when empty.
@@ -167,8 +168,8 @@ below.
   wraps by length (`Chain.SetWrap`), so the next line follows its last row. Only for lines
   without missing displays, in groups not showing only their first line, whose strands are
   a single row (`ns.SingleRow`, `LineWrap`): other lines keep a fixed height.
-- **Anchoring:** `anchorTo = "unit"` rows hang off the host's frame (unit frames, compact
-  party/raid frames, the nameplate itself, not Blizzard's UnitFrame inside it, which
+- **Anchoring:** `anchorTo = "unit"` rows hang off the host's frame (whatever frame shows
+  the unit, see "Unit frames"; the nameplate itself, not Blizzard's UnitFrame inside it, which
   nameplate addons hide). Nameplate rows are only anchored to the plate and parented to
   UIParent: as plate descendants they cost every frame, hidden or not (a city full of plates
   went from 140 to 50 fps). `FollowPlate` copies the plate's alpha and scale onto rows that
@@ -197,6 +198,38 @@ below.
   option (`SkinSize`). Skinned glows use Masque's spell alert rule (`SpellAlert` size
   × 1.4); clip windows reach as far as the skin's widest layer, the icon included
   (`SkinReach`). The group's skin and Scale come from `group.db` (no public getter).
+
+## Unit frames (SlopAuras.lua, "Unit frames")
+
+- Hosts belong to unit tokens, not frames: `singleHosts` (player, target, focus) and
+  `unitHosts` (`GROUP_UNITS`: player and party1-4, pet and partypet1-4, raid1-40,
+  raidpet1-40). A unit host is built the first time its unit has a frame, through a
+  budgeted queue (`QueueHost`, `BUILD_BUDGET_MS`).
+- Each host's frame comes from LibGetFrame (`FindUnitFrame`): the frames it lists for the
+  unit that show exactly that token (`ShowsUnit`; its lookup also matches the same person
+  under another token, e.g. a raid frame for `party1`), whose name is on LibGetFrame's
+  list for the kind (`accepted`: its player/target/focus lists, or its party + raid lists
+  for group units, which keeps pet groups off `PetFrame`), best ranked first (`ranking`).
+  A frame dropped from its list but still showing the unit is kept (`BestFrame`): it
+  lists visible frames only.
+- `Rebind` gives every host its frame; `SetHostFrame` moves rows (`PlaceOrigin`
+  reparents via `RowParent` and re-anchors), which works in combat and while auras are
+  secret. Rebinds are requested (`RequestRebind`, once per frame) by LibGetFrame's
+  `GETFRAME_REFRESH`, the roster refresh, target/focus changes while the host has no
+  frame, `AURA_DATA_PROVIDER_SWITCH`, and hooks on `CompactUnitFrame_SetUnit` and
+  `Grid2:SetFrameUnit`. The hooks also ask LibGetFrame to rescan: its list only updates
+  on a scan (about a second after its own events), but it reads listed frames' units
+  live, so the hooks make unit changes on those frames immediate.
+- Party and raid hosts show only while they have a visible frame (`FRAMED` in
+  `ReadState`); rows anchored to "each unit's own frame" hide while the host has no frame
+  (`UpdateHost`). On party/raid hosts every row is a child of the frame; on you, target
+  and focus only unit-anchored rows are.
+- **Previews:** Edit Mode's party/raid frames and Grid2's test mode show unit "player" in
+  empty slots. While placeholder auras are on (`placeholders`: Edit Mode or test mode),
+  every party/raid-list frame showing "player", except your own party host's frame, gets
+  a preview host (`previewHosts`, `SyncPreviews`): party rows on party-list frames, raid
+  rows on the rest (`PreviewKind`).
+- `EachGroupHost` visits unit and preview hosts.
 
 ## Applying changes
 
