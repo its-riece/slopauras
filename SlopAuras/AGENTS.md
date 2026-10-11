@@ -300,11 +300,11 @@ Use the labels exactly as below; they are what the player sees. The editor says 
   Import a group. The tree on the left lists groups by name.
 - **A group's page**, above its tabs: Name; Units (a dropdown of checkboxes: You, Your
   target, Your focus, Party members, Party pets, Raid members, Raid pets, Nameplates); Test
-  group, Duplicate, Export, Delete. Tabs: Displays, Layout, Shared settings.
+  group, Duplicate, Export, Delete group. Tabs: Displays, Layout, Shared settings.
 - **Displays tab:** Add display, Add line break, Import display, then a second tree: the
   group's displays, numbered, and its line breaks (a gray rule). A line break's page has
   Move up, Move down and Delete.
-- **A display's page**, above its tabs: Move up, Move down, Duplicate, Delete; Name; Shows
+- **A display's page**, above its tabs: Move up, Move down, Duplicate, Delete display; Name; Shows
   (Matching auras, or Icon when none match). Tabs:
   - **Filters:** Filter, with Pick filters (checkboxes for each token; click again to
     exclude it); Spell IDs (exact); Spell IDs (all ranks); Maximum aura duration; Dispel

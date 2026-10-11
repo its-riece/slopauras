@@ -1886,7 +1886,7 @@ local function DisplayOptions(group, display, index, number)
             Changed(true)
             AceConfigDialog:SelectGroup(addonName, "g" .. group.id, "displays", "d" .. (index + 1))
           end),
-          delete = Link(4, "delete", "Delete", "Removes this display", function()
+          delete = Link(4, "delete", "Delete display", "Removes this display", function()
             table.remove(list, index)
             Changed(true)
           end, { confirm = function() return ("Delete %s?"):format(DisplayLabel(display)) end }),
@@ -2190,7 +2190,7 @@ local function GroupOptions(group, index)
         end,
       },
       delete = {
-        type = "execute", order = 1.3, width = 0.7, name = "Delete",
+        type = "execute", order = 1.3, width = 0.7, name = "Delete group",
         -- A confirm function returning a string sets the prompt (AceConfigDialog).
         confirm = function() return ("Delete %s and its displays?"):format(group.name or ("Group " .. group.id)) end,
         func = function()
