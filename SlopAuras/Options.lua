@@ -407,36 +407,88 @@ end
 
 -- Icons for Link as inline escapes, from art this client's own UI uses (the
 -- arrows are the action bar's page buttons, MainActionBar.xml).
+-- Inline icons sit 2px below the capitals' center in GameFontNormal, so they're
+-- raised by LINK_ICON_RAISE (the escapes' y offset).
+local LINK_ICON_SIZE, LINK_ICON_RAISE = 16, 2
+local function AtlasIcon(atlas)
+  return ("|A:%s:%d:%d:0:%d|a"):format(atlas, LINK_ICON_SIZE, LINK_ICON_SIZE, LINK_ICON_RAISE)
+end
+local function FileIcon(path)
+  return ("|T%s:%d:%d:0:%d|t"):format(path, LINK_ICON_SIZE, LINK_ICON_SIZE, LINK_ICON_RAISE)
+end
 local LINK_ICONS = {
-  up = "|A:ui-hud-actionbar-pageuparrow-up:14:14|a",
-  down = "|A:ui-hud-actionbar-pagedownarrow-up:14:14|a",
-  duplicate = "|TInterface\\Buttons\\UI-PlusButton-Up:14|t",
-  delete = "|TInterface\\Buttons\\UI-GroupLoot-Pass-Up:14|t",
+  up = AtlasIcon("ui-hud-actionbar-pageuparrow-up"),
+  down = AtlasIcon("ui-hud-actionbar-pagedownarrow-up"),
+  duplicate = FileIcon("Interface\\Buttons\\UI-PlusButton-Up"),
+  delete = FileIcon("Interface\\Buttons\\UI-GroupLoot-Pass-Up"),
 }
 
--- A clickable line of text in place of a button, for secondary actions (an
--- execute drawn by AceGUI's InteractiveLabel). It has no hover highlight, so
--- an icon and gold text mark it as clickable. The icon is inline: the label only puts its own image beside the
--- text with 200px to spare, and AceConfigDialog's `image` path calls SetLabel,
--- which InteractiveLabel lacks. Each link is as wide as its text, measured in
--- the label's font (GameFontHighlightSmall, AceGUIWidget-Label.lua), plus the
--- icon and a fixed gap. `extra` adds option fields (confirm).
+-- A clickable line of text in place of a button, for secondary actions: an
+-- InteractiveLabel in GameFontNormal (the stock label is GameFontHighlightSmall,
+-- AceGUIWidget-Label.lua), gold, white while hovered. Its own widget type
+-- because AceGUI pools widgets by type and doesn't reset font or color on
+-- acquire, so a changed stock label would turn up in other addons' panels.
+-- The color is set on the font string, not with an escape, so hover can
+-- change it; inline icon escapes keep their own colors.
+local LINK = "SlopAuras-Link"
+local LINK_FONT = "GameFontNormal"
+do
+  local AceGUI = LibStub("AceGUI-3.0")
+  AceGUI:RegisterWidgetType(LINK, function()
+    local link = AceGUI.WidgetRegistry["InteractiveLabel"]()
+    link.type = LINK
+    local function Color()
+      if link.disabled then
+        link.label:SetTextColor(0.5, 0.5, 0.5)
+      elseif link.hovered then
+        link.label:SetTextColor(1, 1, 1)
+      else
+        link.label:SetTextColor(1, 0.82, 0)
+      end
+    end
+    link.frame:HookScript("OnEnter", function()
+      link.hovered = true
+      Color()
+    end)
+    link.frame:HookScript("OnLeave", function()
+      link.hovered = false
+      Color()
+    end)
+    local SetDisabled, OnAcquire = link.SetDisabled, link.OnAcquire
+    function link.SetDisabled(self, disabled)
+      SetDisabled(self, disabled)
+      Color()
+    end
+    function link.OnAcquire(self)
+      self.hovered = false
+      OnAcquire(self)
+      self:SetFontObject(_G[LINK_FONT])
+      Color()
+    end
+    return link
+  end, 1)
+end
+
+-- The icon is inline: the label only puts its own image beside the text with
+-- 200px to spare, and AceConfigDialog's `image` path calls SetLabel, which
+-- InteractiveLabel lacks. Each link is as wide as its text, measured in
+-- LINK_FONT, plus the icon and a fixed gap. `extra` adds option fields
+-- (confirm).
 local measure
 local function LinkWidth(text)
   if not measure then
-    measure = UIParent:CreateFontString(nil, "BACKGROUND", "GameFontHighlightSmall")
+    measure = UIParent:CreateFontString(nil, "BACKGROUND", LINK_FONT)
     measure:Hide()
   end
   measure:SetText(text)
-  return (measure:GetStringWidth() + 14 + 4 + 16) / 170
+  return (measure:GetStringWidth() + LINK_ICON_SIZE + 4 + 16) / 170
 end
 
--- `desc` is required: the tooltip is a link's only response to the mouse, and
--- without a desc it would just repeat the text.
+-- `desc` is required: without one the tooltip would just repeat the text.
 local function Link(order, icon, text, desc, func, extra)
   local option = {
-    type = "execute", order = order, width = LinkWidth(text), dialogControl = "InteractiveLabel",
-    name = ("%s |cffffd100%s|r"):format(LINK_ICONS[icon], text),
+    type = "execute", order = order, width = LinkWidth(text), dialogControl = LINK,
+    name = ("%s %s"):format(LINK_ICONS[icon], text),
     desc = desc, func = func,
   }
   for key, value in pairs(extra or {}) do
