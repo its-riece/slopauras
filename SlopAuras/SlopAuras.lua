@@ -337,10 +337,11 @@ local function Loads(group)
   return false
 end
 
--- Which displays use Masque and which groups are built as a priority stack
--- (ns.StackDisplays), as one string. Both change what's built, but the editor
--- sends them as ordinary look changes (a skin, Max icons shown, an icon size),
--- so Apply compares this to catch them.
+-- Which displays use Masque, which groups are built as a priority stack
+-- (ns.StackDisplays) and which lines are capped (CapFlags), as one string.
+-- All change what's built, but the editor sends them as ordinary look changes
+-- (a skin, Max icons shown, an icon size, a cap), so Apply compares this to
+-- catch them.
 local buildFlags = ""
 
 local function SameValue(a, b)
@@ -363,7 +364,7 @@ end
 -- Keys two displays may differ in and still share an aura group: the name;
 -- known spells, which already decided that both are built (Builds); and the
 -- line's settings, which only the display starting the line holds (SplitLines).
-local MERGE_IGNORES = { name = true, knownSpell = true, dispelTypes = true, wrap = true }
+local MERGE_IGNORES = { name = true, knownSpell = true, dispelTypes = true, wrap = true, lineCap = true }
 
 -- Whether two displays' own settings match apart from MERGE_IGNORES. Both
 -- belong to one group, so what they inherit matches too.
@@ -405,10 +406,14 @@ local function MergedDisplays(group)
   return merged
 end
 
+-- Defined with the line helpers below (LineWrap).
+local LineCap, CapFlags
+
 local function BuildFlags()
   local flags = {}
   for _, group in ipairs(ns.groups) do
     flags[#flags + 1] = ns.StackDisplays(group) and "s" or "-"
+    flags[#flags + 1] = CapFlags(group)
     local merged = MergedDisplays(group)
     for _, display in ns.Displays(group) do
       flags[#flags + 1] = (display.skin == "masque" and "1" or "0") .. (merged[display] and "m" or "")
@@ -581,7 +586,7 @@ end
 -- built (Builds) are left out.
 local function SplitLines(group)
   -- lead: the display that starts the line in the list, built or not; it
-  -- holds the line's settings (wrap), which the editor shows there.
+  -- holds the line's settings (wrap, lineCap), which the editor shows there.
   local lines, line, broken, j, lead = {}, nil, false, 0, nil
   for _, d in ipairs(group.displays) do
     if d.mode == "break" then
@@ -621,6 +626,62 @@ local function LineWrap(group, line)
     return nil
   end
   return line.lead.wrap
+end
+
+-- Why a line can't be capped (lineCap), or nil. `missing`: the line has
+-- missing displays; `wraps`: it wraps (LineWrap), which wins over a cap,
+-- since a cap's window is one row deep.
+--   center:  a centered line's shadow measures the whole line
+--   strand:  later rows of a strand follow the whole container (Strand)
+--   missing: missing icons chain after the whole container, not the window
+--   stack:   a priority stack already shows one icon
+local function CapBlock(group, missing, wraps)
+  if wraps then
+    return "wrap"
+  elseif group.growth == "CENTER" or group.growth == "CENTER_VERTICAL" then
+    return "center"
+  elseif not ns.SingleRow(group) then
+    return "strand"
+  elseif missing then
+    return "missing"
+  elseif ns.StackDisplays(group) then
+    return "stack"
+  end
+end
+
+-- How many icons a line shows across all its displays, or nil for no cap:
+-- the lineCap of the display that starts it, unless CapBlock rules it out.
+function LineCap(group, line)
+  local cap = line.lead and line.lead.lineCap
+  if cap and not CapBlock(group, #line.missingDisplays > 0, LineWrap(group, line)) then
+    return cap
+  end
+end
+
+-- For the editor: why the line that display `index` starts can't be capped,
+-- or nil. Read from the saved list, built or not, as the editor shows it.
+function ns.LineCapBlock(group, index)
+  local lead, missing = group.displays[index], false
+  for j = index, #group.displays do
+    local d = group.displays[j]
+    if d.mode == "break" then
+      break
+    end
+    missing = missing or d.mode == "missing"
+  end
+  local wraps = lead.wrap ~= nil and not missing and not group.firstLine and ns.SingleRow(group)
+  return CapBlock(group, missing, wraps)
+end
+
+-- Which of the group's lines are capped, for BuildFlags: a line that gains or
+-- loses its cap needs another container (Chain.Capped). Edits that change it
+-- (lineCap, wrap, growth) are sent as look changes.
+function CapFlags(group)
+  local flags = {}
+  for k, line in ipairs(SplitLines(group)) do
+    flags[k] = LineCap(group, line) and "c" or "-"
+  end
+  return table.concat(flags)
 end
 
 -- How far a line reaches across: its biggest icon plus the line spacing.
@@ -903,8 +964,10 @@ local function AssignLines(row, host)
     line.origin = row.origins[i]
     if #line.listDisplays > 0 then
       local displays = ListDisplays(line)
+      local cap = LineCap(group, line)
       local function Fits(inst)
-        return (inst.stack == true) == stack and inst.skin == skin and Chain.CanResize(inst, displays)
+        return (inst.stack == true) == stack and inst.skin == skin and Chain.Capped(inst) == (cap ~= nil)
+            and Chain.CanResize(inst, displays)
       end
       -- Preferably one with enough aura groups already (Resize adds the rest).
       line.list = Take(lists, function(inst) return inst.slots >= #displays and Fits(inst) end)
@@ -917,7 +980,7 @@ local function AssignLines(row, host)
       else
         built = true
         line.list = Chain.NewList(row.parent, unit, displays, row.g, group.lineSpacing,
-          ("%s line %d"):format(name, i), plate, skin)
+          ("%s line %d"):format(name, i), plate, skin, cap)
         Chain.SetWrap(line.list, LineWrap(group, line))
       end
     end
@@ -1891,6 +1954,11 @@ local function ConfigureHost(host)
   for _, row in ipairs(host.rows) do
     PlaceOrigin(row, host)
     StyleFirstLine(row)
+    for _, line in ipairs(row.lines) do
+      if line.list then
+        Chain.SetCap(line.list, row.g, LineCap(row.group, line))
+      end
+    end
     if not secret then
       for inst in EachInst(row) do
         Chain.Configure(inst, row.g, row.group.lineSpacing)

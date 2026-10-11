@@ -296,6 +296,7 @@ local DISPLAY_ONLY = {
   filter = function() return Filter end,
   newLine = function() return Boolean end, -- converted, see ns.ConvertNewLine
   wrap = function() return Number(1, 40) end,
+  lineCap = function() return Number(1, 40) end,
   spellIDs = function() return SpellIDs end,
   rankSpellIDs = function() return SpellIDs end,
   maxDuration = function() return Number(1, 86400) end,

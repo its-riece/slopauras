@@ -164,13 +164,23 @@ below.
   you can dispel, the rest would otherwise cost 10 buttons each. Max icons shown then
   counts the merged display. `MergedDisplays` puts the merge state in `BuildFlags` and the
   row signature, so an edit that makes two displays differ splits them again.
-- **Line settings** (`wrap`) live on the display that starts the line in the
+- **Line settings** (`wrap`, `lineCap`) live on the display that starts the line in the
   list, built or not (`line.lead`, `SplitLines`), which is where the editor shows them.
   `SameButDispel` ignores them, so they don't stop a merge.
 - **Wrapping lines** (`wrap`): the container's flow layout
   wraps by length (`Chain.SetWrap`), so the next line follows its last row. Only for lines
   without missing displays, in groups not showing only their first line, whose strands are
   a single row (`ns.SingleRow`, `LineWrap`): other lines keep a fixed height.
+- **Capped lines** (`lineCap`): show only the first N icons across the line's displays, in
+  display order. No container caps icons across aura groups, so the container sits in a
+  clip window anchored to its own start (`StyleCap`, `Chain.NewList`), N slots of the
+  line's biggest icon long. Lines across it follow the container, which stays one icon
+  deep, so empty lines still collapse. `CapBlock` rules it out for wrapping lines (wrap
+  wins), centered growth (the shadow measures the whole line), strands of several rows
+  and lines with missing displays (both chain after the whole container), and priority
+  stacks. A line is built capped or not for good (`Chain.Capped`): `CapFlags` puts that
+  in `BuildFlags`, and `AssignLines` only reuses a container of the same kind. The window
+  size follows edits (`Chain.SetCap` in `ConfigureHost`), while auras are secret too.
 - **Anchoring:** `anchorTo = "unit"` rows hang off the host's frame (whatever frame shows
   the unit, see "Unit frames"; the nameplate itself, not Blizzard's UnitFrame inside it, which
   nameplate addons hide). Nameplate rows are only anchored to the plate and parented to
@@ -300,9 +310,12 @@ Use the labels exactly as below; they are what the player sees. The editor says 
     exclude it); Spell IDs (exact); Spell IDs (all ranks); Maximum aura duration; Dispel
     types (Magic, Curse, Disease, Poison, Bleed, No type; none ticked shows every type);
     Icon (only for Icon when none match).
-  - **Appearance**, in sections. Arrangement: Max icons shown, Wrap after (only on a
+  - **Appearance**, in sections. Arrangement: Max icons shown, Spacing; Wrap after (only on a
     display that starts a row with no Icon when none match in it, in a group with one row
-    per unit and not showing only its first row), Spacing; Sort, Reverse sort. Icon: Size, Zoom, Alpha; Tint
+    per unit and not showing only its first row; locked while a cap is set), Max icons per
+    row (on a display that starts a row; hidden where a cap can't apply unless one is set,
+    locked while the row wraps); a warning when the cap is ignored or the row mixes icon
+    sizes; Sort, Reverse sort. Icon: Size, Zoom, Alpha; Tint
     (then Tint color); Desaturate, Hide swipe; Tooltips. Border: Skin (only with Masque
     installed), Border (None, Dispel color, Custom), Border style; Border width; Color.
     Glow: Glow (None, Gold, Custom), Glow color, and Glow when (In combat, Out of combat,
@@ -388,7 +401,8 @@ token matches nothing; empty or absent: any; a display's empty list overrides it
 
 Display only: `name`, `mode` (`list`, `missing`), `filter` (absent = `"HELPFUL"`; a group
 `filter` from older saves or strings moves to its displays, `ns.MoveGroupFilter`), `wrap` (icons per row on
-the line this display starts), `spellIDs` and
+the line this display starts), `lineCap` (1-40: icons shown across the line this display
+starts), `spellIDs` and
 `rankSpellIDs` (sets `{ [id] = true }`, `false` = exclude), `dispelTypes`, `maxDuration`
 (seconds, the container's `maxDuration` candidate filter), `icon`.
 

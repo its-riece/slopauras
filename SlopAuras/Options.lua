@@ -276,6 +276,72 @@ local function Capital(text)
   return (text:gsub("^%l", string.upper))
 end
 
+-- Whether the display at list index `index` starts a line: it's the first,
+-- or the first after a line break. Line settings (wrap, lineCap) live there.
+local function StartsLine(group, index)
+  local prev = group.displays[index - 1]
+  return not prev or prev.mode == "break"
+end
+
+-- Why the cap on the line display `index` starts does nothing
+-- (ns.LineCapBlock), or nil.
+local function CapBlockText(group, index)
+  local row = RowWord(group)
+  local block = ns.LineCapBlock(group, index)
+  if block == "wrap" then
+    return ("This %s wraps instead. Set Wrap after to 0 to cap it."):format(row)
+  elseif block == "center" then
+    return ("You can't cap a centered %s. Pick another Grow direction to cap it."):format(row)
+  elseif block == "strand" then
+    return ("Anchor the group to each unit's own frame to cap this %s"):format(row)
+  elseif block == "missing" then
+    return ("Move the \"Icon when none match\" display to its own %s to cap this display"):format(row)
+  elseif block == "stack" then
+    return ("Each %s here shows one icon, so the cap changes nothing"):format(row)
+  end
+end
+
+-- The smallest and biggest icon size among the list displays in the line
+-- display `index` starts.
+local function LineSizes(group, index)
+  local small, big
+  for j = index, #group.displays do
+    local d = group.displays[j]
+    if d.mode == "break" then
+      break
+    elseif d.mode ~= "missing" then
+      small, big = math.min(small or d.size, d.size), math.max(big or d.size, d.size)
+    end
+  end
+  return small, big
+end
+
+-- Under Max icons per row: why the cap is ignored, or that mixed icon sizes
+-- let more icons through than it says (the window counts slots of the
+-- biggest icon, Chain.lua StyleCap).
+local function CapWarning(group, index, display)
+  local function Text()
+    local cap = StartsLine(group, index) and rawget(display, "lineCap")
+    if not cap then
+      return nil
+    end
+    local block = CapBlockText(group, index)
+    if block then
+      return ALERT .. (" |cffff9933Max icons per %s is ignored|r\n"):format(RowWord(group)) .. block
+    end
+    local small, big = LineSizes(group, index)
+    if small and small ~= big then
+      return ALERT .. (" |cffff9933Icons in this %s have different sizes|r\n"):format(RowWord(group))
+          .. ("The cap makes room for %d icons at %dpx, so more of the smaller ones fit"):format(cap, big)
+    end
+  end
+  return {
+    type = "description", width = "full", fontSize = "medium",
+    name = function() return Text() or "" end,
+    hidden = function() return Text() == nil end,
+  }
+end
+
 local function FirstLineTitle(group)
   return ("\"Show only the first %s\" doesn't work with these icon sizes"):format(RowWord(group))
 end
@@ -1129,7 +1195,7 @@ local function SharedTabs(t, isDisplay, extra)
   end
   look.args = {
     layout = Section(1, "Arrangement", {
-      { "max", "wrap", "spacing" }, { "sort", "sortReverse" },
+      { "max", "spacing" }, { "wrap", "lineCap" }, { "lineCapWarning" }, { "sort", "sortReverse" },
     }),
     icon = Section(2, "Icon", {
       { "size", "zoom", "alpha" }, { "tintMode" }, { "tint" }, { "desaturate", "hideSwipe" },
@@ -1684,15 +1750,48 @@ local function DisplayOptions(group, display, index, number)
       desc = function()
         local text = "Wraps this %s after this many icons. 0: no wrapping. Counts icons at this display's size, "
             .. "so bigger icons later in the %s fit fewer before it wraps."
-        return text:format(RowWord(group), RowWord(group))
+        text = text:format(RowWord(group), RowWord(group))
+        if rawget(display, "lineCap") and not rawget(display, "wrap") then
+          text = text .. ("\n\nSet Max icons per %s to 0 to wrap"):format(RowWord(group))
+        end
+        return text
       end,
       hidden = function() return not CanWrap(group, index) end,
+      -- A capped row can't wrap. Both set (from an import), it wraps, and the
+      -- cap's warning says so.
+      disabled = function() return rawget(display, "lineCap") ~= nil and not rawget(display, "wrap") end,
       get = function() return rawget(display, "wrap") or 0 end,
       set = function(_, value)
         display.wrap = value > 0 and value or nil
         Changed(false)
       end,
     },
+    lineCap = {
+      type = "range", min = 0, max = 40, step = 1,
+      name = function() return "Max icons per " .. RowWord(group) end,
+      desc = function()
+        local text = ("Shows at most this many icons in this display's %s, counting the other displays in it. "
+          .. "Earlier displays come first. 0: no limit."):format(RowWord(group))
+        local block = rawget(display, "lineCap") == nil and CapBlockText(group, index)
+        return block and text .. "\n\n" .. block or text
+      end,
+      -- Shown where it can apply, or where a cap is already set (CapWarning
+      -- says why it's ignored). While the row wraps, shown but locked.
+      hidden = function()
+        if not StartsLine(group, index) then
+          return true
+        end
+        local block = ns.LineCapBlock(group, index)
+        return rawget(display, "lineCap") == nil and block ~= nil and block ~= "wrap"
+      end,
+      disabled = function() return rawget(display, "lineCap") == nil and ns.LineCapBlock(group, index) == "wrap" end,
+      get = function() return rawget(display, "lineCap") or 0 end,
+      set = function(_, value)
+        display.lineCap = value > 0 and value or nil
+        Changed(false)
+      end,
+    },
+    lineCapWarning = CapWarning(group, index, display),
   })
   look.order, text.order, load.order = 2, 3, 4
 

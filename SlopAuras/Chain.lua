@@ -976,13 +976,15 @@ local function GroupOptions(d, g, lineSpacing, half, maxCount, init)
   }
 end
 
-local function NewContainer(parent, unit, g)
+-- `placeholder`: where the container starts until Link places it, when that
+-- can't be its parent.
+local function NewContainer(parent, unit, g, placeholder)
   -- Frames anchored to an aura container must opt out of untrusted layout
   -- scripts, and every container here is anchored to another one.
   local container = CreateFrame("AuraContainer", nil, parent,
     "CustomAuraContainerTemplate, DisableUntrustedLayoutScriptsTemplate")
   container:Hide()
-  container:SetPoint(g.start, parent, g.start)
+  container:SetPoint(g.start, placeholder or parent, g.start)
   container:SetUnit(unit)
   container:SetFlowLayoutAxis(g.axis)
   container:SetFlowLayoutAnchorPoint(g.start)
@@ -1128,18 +1130,58 @@ local function AddGroup(inst, container, j, d, options)
   last.layout = LayoutText(options.layout)
 end
 
+-- A capped line (lineCap) shows only its first `cap` icons, whichever
+-- displays they come from: no container caps icons across its aura groups
+-- (maxFrameCount is per group, Blizzard_AuraContainerGroups.lua), so the
+-- container sits in a clip window anchored to its own start. Empty displays
+-- collapse, so the window holds the first displays that have auras. Lines
+-- across it still follow the container, which is as deep as one icon whatever
+-- the window hides. The window counts slots of the line's biggest icon, so a
+-- capped line wants one icon size. It reaches past the icons for borders,
+-- glows and skins (GlowPad, or a fifth of an icon for dispel borders), but on
+-- the far side only as far as the spacing allows without showing the next
+-- icon or its border.
+local function StyleCap(inst, g, cap)
+  local size = 0
+  for _, d in ipairs(inst.displays) do
+    size = math.max(size, d.size)
+  end
+  local spacing = inst.displays[1].spacing
+  local reach = math.ceil(size / 5)
+  for _, d in ipairs(inst.displays) do
+    reach = math.max(reach, GlowPad(d, SkinData(inst, d)))
+  end
+  local farReach = math.max(0, math.min(reach, spacing - reach))
+  local width, height = Slot(g, reach + cap * (size + spacing) - spacing + farReach, size + 2 * reach)
+  inst.capWindow:SetSize(width, height)
+  inst.capWindow:ClearAllPoints()
+  Anchor(inst.capWindow, g.start, inst.main, g.start, -(g.dx + g.cx) * reach, -(g.dy + g.cy) * reach)
+end
+
 -- One line's list displays, for one unit: a container with an aura group per
 -- display (keys d1, d2, ... in line order), hidden. `label` names its frames
 -- in /fstack, e.g. "MyDebuffs line 1". `plate`: the line is on a nameplate
--- host. `skin`: the group's Masque group, or nil.
-function Chain.NewList(parent, unit, displays, g, lineSpacing, label, plate, skin)
+-- host. `skin`: the group's Masque group, or nil. `cap`: show only that many
+-- icons (StyleCap; not for centered lines, whose shadow measures the whole
+-- line).
+function Chain.NewList(parent, unit, displays, g, lineSpacing, label, plate, skin, cap)
   -- slots: aura groups made, past #displays when Resize left spares.
   -- masque[j]: whether slot j's buttons are registered with Masque.
   local inst = {
     displays = displays, parts = {}, on = {}, inRange = true, plate = plate, skin = skin, slots = #displays, masque = {},
     unit = unit,
   }
-  inst.main = NewContainer(parent, unit, g)
+  if cap and not g.shadow then
+    inst.capWindow = CreateFrame("Frame", nil, parent, "DisableUntrustedLayoutScriptsTemplate")
+    Name(inst.capWindow, label .. " (cap)")
+    inst.capWindow:SetClipsChildren(true)
+    inst.capWindow:Hide()
+    -- The window is anchored to the container, so the container can't start
+    -- at the window.
+    inst.main = NewContainer(inst.capWindow, unit, g, parent)
+  else
+    inst.main = NewContainer(parent, unit, g)
+  end
   Name(inst.main, label)
   for j, d in ipairs(displays) do
     inst.parts[j] = {}
@@ -1153,7 +1195,25 @@ function Chain.NewList(parent, unit, displays, g, lineSpacing, label, plate, ski
       AddGroup(inst, inst.shadow, j, d, GroupOptions(d, g.shadow, lineSpacing, true))
     end
   end
+  if inst.capWindow then
+    StyleCap(inst, g, cap)
+  end
   return inst
+end
+
+-- Whether list line `inst` was built capped. A line is capped or not for
+-- good, so a line that gains or loses its cap needs another container.
+function Chain.Capped(inst)
+  return inst.capWindow ~= nil
+end
+
+-- Resizes a capped line's window for `cap` icons, after its displays or
+-- their sizes changed. Only our own frame is touched, so it works while auras
+-- are secret.
+function Chain.SetCap(inst, g, cap)
+  if inst.capWindow and cap then
+    StyleCap(inst, g, cap)
+  end
 end
 
 -- A priority stack: for a row that shows only its first line, where every
@@ -1440,6 +1500,9 @@ end
 function Chain.SetActive(inst, active)
   Toggle(inst.main, active)
   Toggle(inst.shadow, active)
+  if inst.capWindow then
+    inst.capWindow:SetShown(active)
+  end
   if inst.window then
     Toggle(inst.slide, active)
     inst.window:SetShown(active)
