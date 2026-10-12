@@ -269,23 +269,38 @@ below.
 ## The editor (Options.lua)
 
 - `/slop` toggles AceConfigDialog's standalone window, the editor's only home: it isn't in
-  the game's Options → AddOns, which is too narrow for its two trees. `Refresh`
+  the game's Options → AddOns, which is too narrow for the tree beside the settings. `Refresh`
   (`NotifyChange`) redraws it.
 - Options.lua rebuilds its AceConfig options table from `ns.groups` on every redraw.
   Per-page UI state (open import boxes, pickers) lives in upvalues keyed by page.
-- Tree: groups only, in name order (`SortedGroups`; their order in `ns.groups` does
-  nothing outside the editor). The pages are laid out in "Walking a player through the
-  editor" below. A node's child groups go either in the tree or in tabs (`childGroups`),
-  never both; AceConfigDialog draws a new tree for a tree group under a tab, which is how
-  the Displays tab gets its own tree (`GroupOptions`; a tab's own options draw above its
-  tree). Tree entries are keyed by list position (`d<i>` displays, `b<i>` line breaks), so a
-  display's path is `{ "g<id>", "displays", "d<i>" }`.
+- One tree, groups in name order (`SortedGroups`; their order in `ns.groups` does nothing
+  outside the editor). A group node (`GroupOptions`) has its own page and these children:
+  one node per display (`d<i>`, tabs) or line break (`b<i>`), keyed by list position, so a display's path is
+  `{ "g<id>", "d<i>" }`. AceConfigDialog puts a node's child groups either in the tree or in
+  tabs (`childGroups`), never both: groups and the root are tree nodes, displays are tab nodes.
+  The group's own Layout | Shared settings tabs are emulated (`TabButton`, `Shown`, per-group
+  state in `groupTabs`): plain buttons plus inline groups that hide by state, because a node
+  can't have both tree children and tab children. A node's own options draw above its tabs. The root's options (the
+  toolbar) draw above the tree, on every page. `AceConfigDialog:SelectGroup` opens a page.
+- Every page starts with `Header`: `Crumbs` (a plain-text trail, `Group > page`), then whatever
+  buttons the page has (`Button`, `GoTo`). Buttons act (Duplicate, Delete, Move); navigation is
+  the tree's job. Header extras use orders above 11.
+  The group page has no display list: displays are reordered, copied and deleted from their own
+  pages (Move up, Move down, Duplicate, Delete).
+  `CarryTab` keeps the open tab when you open another display (the `FeedGroup` hook).
+  The tree is `treewidth` 270 by default.
+- `HookTree` (the root `FeedGroup`) sets up the TreeGroup: groups start folded each time
+  `ns.ToggleEditor` opens the editor (`freshOpen`), a click opens a group and a second click on
+  the selected one folds it, and the "Not loaded" heading (`notLoadedHeading`, never a page)
+  folds the not loaded groups away (`notLoadedOpen`, which their `hidden` reads). The
+  `Minimap button` checkbox in the window's top right corner (`AttachMinimapCheck`) saves
+  `SlopAurasDB.minimap = { show, angle }`; the button is drawn by `CreateMinimapButton`.
 - Right-click on a control clears a display's own value (`HookWidgets`, `Resettable`).
-- `SharedTabs` builds the three tabs a group and a display share: Appearance, Text and Load
-  conditions. Appearance is built flat, then grouped into sections (Arrangement, Icon,
+- `SharedTabs` builds the three tabs Shared settings and a display share: Appearance, Text and
+  Load conditions. Appearance is built flat, then grouped into sections (Arrangement, Icon,
   Border, Glow) by `Section` at its end: a new Appearance control needs a row there too, or
   it won't show. Text holds one `TextBox` each for the timer and stacks. A group's Layout
-  tab (`LayoutTab`) holds the Rows/Columns section (`LineControls`) and Anchor.
+  `LayoutTab` holds the Rows/Columns section (`LineControls`) and Anchor.
 - AceConfigDialog lays controls out left to right and wraps; numeric widths are multiples
   of 170px; a tab group fills to the panel bottom (nothing can sit below it); a description
   has one font size.
@@ -296,16 +311,29 @@ below.
 Use the labels exactly as below; they are what the player sees. The editor says **row**, or
 **column** for a group that grows up or down, where the code says line. `/slop` opens it.
 
-- **Top of the window:** New group, Test mode; Export full config, Import full config,
-  Import a group. The tree on the left lists groups by name.
-- **A group's page**, above its tabs: Name; Units (a dropdown of checkboxes: You, Your
-  target, Your focus, Party members, Party pets, Raid members, Raid pets, Nameplates); Test
-  group, Duplicate, Export, Delete group. Tabs: Displays, Layout, Shared settings.
-- **Displays tab:** Add display, Add line break, Import display, then a second tree: the
-  group's displays, numbered, and its line breaks (a gray rule). A line break's page has
-  Move up, Move down and Delete.
-- **A display's page**, above its tabs: Move up, Move down, Duplicate, Delete display; Name; Shows
-  (Matching auras, or Icon when none match). Tabs:
+- **Top of the window** (always visible): + New group, Test mode; Export full config, Import
+  full config, Import a group; a small Minimap button checkbox in the top right corner (off by
+  default; adds a minimap button, left-click opens this editor). Under them, Groups: the tree on
+  the left lists groups by name, with their number of displays, all folded when the editor
+  opens. Click a group to open it and again to fold it; it expands to its displays and line breaks. Class icons mark what loads where: one per class a group or
+  display loads on (the group's are those of its displays), none in the tree when every class
+  does (`ClassBadge`; a gear on the group page's display buttons). Groups with at least one
+  display that isn't set to never load come first; the rest sit gray under a "Not loaded"
+  heading (`GroupLoaded`), which folds them away (closed each time the editor opens). The Load checkbox unloads or reloads a whole group with the
+  existing `neverLoad` keys only (`SetGroupLoaded`): unloading writes an explicit never load
+  on displays that were already off and lets the others follow the group's, so loading again
+  restores just the ones that were on. Class doesn't count: a group for another class still
+  counts as loaded.
+- **Every page** starts with a plain-text trail: Group > page. Use the tree on the left to move.
+- **A group's page:** Name; Units (a dropdown of checkboxes: You, Your target, Your focus,
+  Party members, Party pets, Raid members, Raid pets, Nameplates); Test group, Duplicate,
+  Export, Delete group, and a Load checkbox. An
+  add bar: + Add display, + Add line break, Import display. Then two tabs, Layout and
+  Shared settings, drawn as tabs (`SlopAuras-Tab` widget). Layout is the Rows/Columns and Anchor
+  boxes below. Shared settings has Appearance, Text and Load conditions buttons.
+- **A line break's page:** Move up, Move down, Delete line break.
+- **A display's page**, above its tabs: Move up, Move down, Duplicate, Delete display; Name; Shows (Matching auras, or Icon when none
+  match). Tabs:
   - **Filters:** Filter, with Pick filters (checkboxes for each token; click again to
     exclude it); Spell IDs (exact); Spell IDs (all ranks); Maximum aura duration; Dispel
     types (Magic, Curse, Disease, Poison, Bleed, No type; none ticked shows every type);
@@ -330,12 +358,12 @@ Use the labels exactly as below; they are what the player sees. The editor says 
     Offline, Out of sight; Power types, checkboxes for Mana, Rage, Energy, Focus).
   - **Import / export:** Move to group (with two or more groups), Export this display
     (with Include the group's values), Import new settings.
-- **Layout tab:** a Rows (or Columns) box: Grow, New rows go, Row spacing, Show only the
+- **Layout** (first tab of a group's page): a Rows (or Columns) box: Grow, New rows go, Row spacing, Show only the
   first row (only for a group with one row per unit: anchored to each unit's own frame, or
   showing just one of You, Your target, Your focus; `ns.SingleRow`). An Anchor box: Anchor to (Each
   unit's own frame, Screen, A named frame), Frame name (named frame only), Group's point,
   To the frame's, X, Y, Layer.
-- **Shared settings tab:** the same Appearance, Text and Load conditions tabs as a
+- **Shared settings** (second tab of a group's page): the same Appearance, Text and Load conditions tabs as a
   display's, holding the group's values. Every display uses them unless it sets its own.
   On a display, an asterisk after a label marks its own value; right-clicking the control
   goes back to the group's.
