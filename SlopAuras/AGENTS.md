@@ -327,7 +327,7 @@ Use the labels exactly as below; they are what the player sees. The editor says 
   (Matching auras, or Icon when none match). Tabs:
   - **Filters:** Filter, with Pick filters (checkboxes for each token; click again to
     exclude it); Spell IDs (exact); Spell IDs (all ranks); Maximum aura duration; Dispel
-    types (Magic, Curse, Disease, Poison, Bleed, No type; none ticked shows every type);
+    types (Magic, Curse, Disease, Poison, Bleed, No type; none ticked: any);
     Icon (only for Icon when none match).
   - **Appearance**, in sections. Arrangement: Max icons shown, Spacing; Wrap after (only on a
     display that starts a row with no Icon when none match in it, in a group with one row
@@ -347,7 +347,7 @@ Use the labels exactly as below; they are what the player sees. The editor says 
     Mounted state; Which nameplates, on nameplate groups only; Only if you know spell;
     Hide while you're dead, Never load) and a "Hide a unit's icons when" box (Dead,
     Offline, Out of sight; Power types, checkboxes for Mana, Rage, Energy, Focus).
-  - **Import / export:** Move to group (with two or more groups), Export this display
+  - **Import / export:** Move to group (with two or more groups), Export
     (with Include the group's values), Import new settings.
 - **Layout** (on the group's page): a Rows (or Columns) box: Grow, New rows go, Row spacing, Show only the
   first row (only for a group with one row per unit: anchored to each unit's own frame, or

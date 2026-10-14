@@ -573,24 +573,24 @@ local VALIDATORS = {
 function Share.Import(text, kind)
   text = strtrim(text or "")
   if text == "" then
-    return nil, "Nothing pasted."
+    return nil, "Nothing pasted"
   end
   local version, found, json = text:match("^SlopAuras:(%d+):(%a+):(.*)$")
   if not version then
     return nil, "That isn't SlopAuras text. It should start with \"SlopAuras:\"."
   end
   if tonumber(version) ~= VERSION then
-    return nil, ("That text is from a different version of SlopAuras (format %s)."):format(version)
+    return nil, ("That text is from a different version of SlopAuras (format %s)"):format(version)
   end
   if not VALIDATORS[found] then
-    return nil, ("Unknown kind of text: %q."):format(found)
+    return nil, ("Unknown kind of text: %q"):format(found)
   end
   if found ~= kind then
-    return nil, ("That text holds %s, not %s."):format(KIND_NAMES[found], KIND_NAMES[kind])
+    return nil, ("That text holds %s, not %s"):format(KIND_NAMES[found], KIND_NAMES[kind])
   end
   local parsed, value = pcall(C_EncodingUtil.DeserializeJSON, json)
   if not parsed or value == nil then
-    return nil, "The text after the prefix isn't valid JSON."
+    return nil, "The text after the prefix isn't valid JSON"
   end
   local ok, result = pcall(VALIDATORS[kind], value)
   if not ok then

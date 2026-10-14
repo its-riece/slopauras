@@ -136,7 +136,7 @@ local function DescribeIDs(set, ranks)
       if ranks then
         local family = ns.SpellRanks(id)
         line = line .. (family and ("  all %d ranks"):format(#family)
-          or "  |cffffd100no other ranks known, matches exactly|r")
+          or "  |cff808080no other ranks known, matches exactly|r")
       end
       table.insert(lines, line)
     else
@@ -576,18 +576,18 @@ end
 
 local FILTER_TOKENS = {
   -- No exclude state: a filter needs one of these two to match anything.
-  { "HELPFUL", "Buffs.", noNegate = true },
-  { "HARMFUL", "Debuffs.", noNegate = true },
-  { "PLAYER", "Cast by you or your pet." },
-  { "RAID", "Buffs you can cast, and debuffs you can dispel." },
-  { "CANCELABLE", "Auras you can right-click off." },
-  { "CROWD_CONTROL", "Stuns, fears, polymorphs and other crowd control." },
-  { "DISPELLABLE", "Auras anyone can dispel." },
-  { "RAID_PLAYER_DISPELLABLE", "Auras someone in your group can dispel." },
-  { "RAID_IN_COMBAT", "Auras the game shows on raid frames in combat." },
-  { "EXTERNAL_DEFENSIVE", "Defensive buffs cast on the unit by someone else." },
-  { "BIG_DEFENSIVE", "Big defensive cooldowns." },
-  { "IMPORTANT", "Auras the game marks as important." },
+  { "HELPFUL", "Buffs", noNegate = true },
+  { "HARMFUL", "Debuffs", noNegate = true },
+  { "PLAYER", "Cast by you or your pet" },
+  { "RAID", "Buffs you can cast, and debuffs you can dispel" },
+  { "CANCELABLE", "Auras you can right-click off" },
+  { "CROWD_CONTROL", "Stuns, fears, polymorphs and other crowd control" },
+  { "DISPELLABLE", "Auras anyone can dispel" },
+  { "RAID_PLAYER_DISPELLABLE", "Auras someone in your group can dispel" },
+  { "RAID_IN_COMBAT", "Auras the game shows on raid frames in combat" },
+  { "EXTERNAL_DEFENSIVE", "Defensive buffs cast on the unit by someone else" },
+  { "BIG_DEFENSIVE", "Big defensive cooldowns" },
+  { "IMPORTANT", "Auras the game marks as important" },
 }
 
 local listedTokens = {}
@@ -653,7 +653,7 @@ local function AddFilterPicker(args, order, key, get, set)
   local pickArgs = {
     help = {
       type = "description", order = 0, width = "full",
-      name = "Click once to include, again to exclude, a third time to clear.",
+      name = "Click once to include, again to exclude, a third time to clear",
     },
   }
   for i, entry in ipairs(FILTER_TOKENS) do
@@ -690,7 +690,7 @@ local function AddFilterPicker(args, order, key, get, set)
 
   args.filterWarning = {
     type = "description", order = order + 0.005, width = "full", fontSize = "medium",
-    name = "|cffff9933Add HELPFUL (buffs) or HARMFUL (debuffs), or this filter matches nothing.|r",
+    name = "|cffff9933Add HELPFUL (buffs) or HARMFUL (debuffs), or this filter matches nothing|r",
     hidden = function() return HasAuraType(get()) end,
   }
 
@@ -727,12 +727,13 @@ local function SharedTabs(t, isDisplay, extra)
     end
   end
 
-  -- Tooltip for a control on `key` (or a list of keys): what it does, plus,
-  -- on a display with its own value, how to get the group's back.
+  -- Tooltip for a control on `key` (or a list of keys): `text` (optional),
+  -- plus, on a display with its own value, how to get the group's back.
   local function Desc(key, text)
     return function()
       if isDisplay and OwnsAny(key) then
-        return text .. "\n\nRight click to reset to group's value."
+        local hint = "Right click to reset to group's value"
+        return text and text .. "\n\n" .. hint .. "." or hint
       end
       return text
     end
@@ -851,13 +852,13 @@ local function SharedTabs(t, isDisplay, extra)
       args = {
         inCombat = Resettable({
           type = "toggle", order = 1, width = 1.5, name = Label("glowCombat", "In combat", true),
-          desc = Desc("glowCombat", "Glows while you're in combat."),
+          desc = Desc("glowCombat", "Glows while you're in combat"),
           get = function() return InCombat("in") end,
           set = function(_, value) SetCombat(value, InCombat("out")) end,
         }, "glowCombat"),
         outOfCombat = Resettable({
           type = "toggle", order = 2, width = 1.5, name = Label("glowCombat", "Out of combat", true),
-          desc = Desc("glowCombat", "Glows while you're out of combat."),
+          desc = Desc("glowCombat", "Glows while you're out of combat"),
           get = function() return InCombat("out") end,
           set = function(_, value) SetCombat(InCombat("in"), value) end,
         }, "glowCombat"),
@@ -913,20 +914,20 @@ local function SharedTabs(t, isDisplay, extra)
         hide = Toggle(hideKey, 1, hideLabel, hideDesc),
         break1 = Break(1.5),
         font = font,
-        size = Slider("Size", 3, "Size", 6, 32, "Font size of the text."),
+        size = Slider("Size", 3, "Size", 6, 32, "Font size of the text"),
         outline = Select("Outline", 4, "Outline", OUTLINES, { "NONE", "OUTLINE", "THICKOUTLINE" },
-          "The outline drawn around the letters."),
+          "The outline drawn around the letters"),
         break2 = Break(4.5),
-        point = Select("Point", 5, "Position", POINTS, POINT_ORDER, "Where on the icon the text sits."),
+        point = Select("Point", 5, "Position", POINTS, POINT_ORDER, "Where on the icon the text sits"),
         align = Select("Align", 6, "Alignment", ALIGNS, { "LEFT", "CENTER", "RIGHT" },
           "Which side of the text sits on Position. At a right-hand corner, Right keeps the text inside the icon "
           .. "and Left starts it there, running outward."),
         break3 = Break(6.5),
-        x = Slider("X", 7, "X", -50, 50, "Moves the text right (positive) or left (negative) from Position, in pixels."),
-        y = Slider("Y", 8, "Y", -50, 50, "Moves the text up (positive) or down (negative) from Position, in pixels."),
+        x = Slider("X", 7, "X", -50, 50, "Moves the text right (positive) or left (negative) from Position, in pixels"),
+        y = Slider("Y", 8, "Y", -50, 50, "Moves the text up (positive) or down (negative) from Position, in pixels"),
         break4 = Break(8.5),
         color = Resettable({
-          type = "color", order = 9, name = Label(Key("Color"), "Color", true), desc = Desc(Key("Color"), "The text's color."),
+          type = "color", order = 9, name = Label(Key("Color"), "Color", true), desc = Desc(Key("Color"), "The text's color"),
           disabled = Disabled,
           get = function() return unpack(t[Key("Color")]) end,
           set = function(_, r, g, b) Set(Key("Color"), { r, g, b }) end,
@@ -967,13 +968,13 @@ local function SharedTabs(t, isDisplay, extra)
   local look = {
     type = "group", name = "Appearance",
     args = {
-      size = Range("size", 1, "Size", 8, 128, 1, nil, "Width and height of each icon, in pixels."),
-      spacing = Range("spacing", 2, "Spacing", 0, 40, 1, nil, "Gap between icons, in pixels."),
+      size = Range("size", 1, "Size", 8, 128, 1, nil, "Width and height of each icon, in pixels"),
+      spacing = Range("spacing", 2, "Spacing", 0, 40, 1, nil, "Gap between icons, in pixels"),
       alpha = Range("alpha", 3, "Alpha", 0, 1, 0.05, true, "How opaque the icons are. 100% is fully visible."),
       break1 = Break(3.9),
       zoom = Range("zoom", 4, "Zoom", 0, 1, 0.01, true),
       max = Range("max", 4.3, "Max icons shown", 1, 40, 1, nil,
-        "Maximum number of icons this display shows."),
+        "Maximum number of icons this display shows"),
       break1b = Break(4.9),
       sort = {
         type = "select", order = 6, name = Label("sort", "Sort"),
@@ -981,11 +982,11 @@ local function SharedTabs(t, isDisplay, extra)
         get = function() return t.sort or "Default" end,
         set = function(_, value) Set("sort", value) end,
       },
-      sortReverse = Toggle("sortReverse", 6.1, "Reverse sort", "Flips the sort order."),
+      sortReverse = Toggle("sortReverse", 6.1, "Reverse sort", "Flips the sort order"),
       break2 = Break(6.9),
       tintMode = {
         type = "select", order = 7, name = Label("tint", "Tint"),
-        desc = Desc("tint", "Colors the icon art."),
+        desc = Desc("tint", "Colors the icon art"),
         values = { none = "None", custom = "Custom" },
         get = function() return type(t.tint) == "table" and "custom" or "none" end,
         -- A display's "none" is saved as false, so it can override a group's tint.
@@ -1045,7 +1046,7 @@ local function SharedTabs(t, isDisplay, extra)
         get = function() return unpack(t.borderColor) end,
         set = function(_, r, g, b) Set("borderColor", { r, g, b }) end,
       },
-      borderWidth = Range("borderWidth", 8.06, "Border width", 1, 8, 1, nil, "How thick the plain border is, in pixels."),
+      borderWidth = Range("borderWidth", 8.06, "Border width", 1, 8, 1, nil, "How thick the plain border is, in pixels"),
       break2b = Break(8.1),
       glowMode = {
         type = "select", order = 8.2, name = Label("glow", "Glow"),
@@ -1066,7 +1067,7 @@ local function SharedTabs(t, isDisplay, extra)
       },
       glowWhen = GlowWhenBox(),
       break3 = Break(8.9),
-      desaturate = Toggle("desaturate", 9, "Desaturate", "Shows the icon art in grayscale."),
+      desaturate = Toggle("desaturate", 9, "Desaturate", "Shows the icon art in grayscale"),
       hideSwipe = Toggle("hideSwipe", 10, "Hide swipe"),
       tooltip = Resettable({
         type = "select", order = 10.5, name = Label("tooltip", "Tooltips"),
@@ -1086,9 +1087,9 @@ local function SharedTabs(t, isDisplay, extra)
   local text = {
     type = "group", name = "Text", hidden = ListOnly,
     args = {
-      timer = TextBox(1, "Timer", "timer", "hideTimer", "Hide timer", "Hides the time-left countdown on each icon.",
+      timer = TextBox(1, "Timer", "timer", "hideTimer", "Hide timer", "Hides the time-left countdown on each icon",
         TimerFormatArgs),
-      stacks = TextBox(2, "Stacks", "stack", "hideStacks", "Hide stacks", "Hides the stack count on each icon."),
+      stacks = TextBox(2, "Stacks", "stack", "hideStacks", "Hide stacks", "Hides the stack count on each icon"),
     },
   }
   look.args.zoom.desc = Desc("zoom", "Crops the icon's edges. At 0% you see the whole texture, including the border drawn into it.")
@@ -1105,8 +1106,8 @@ local function SharedTabs(t, isDisplay, extra)
     args = {
       class = {
         type = "multiselect", order = 0, width = "full", values = ClassValues,
-        name = Label("class", "Classes (none ticked: all)"),
-        desc = Desc("class", "Shows only on characters of the ticked classes. None ticked: every class."),
+        name = Label("class", "Classes (none ticked: any)"),
+        desc = Desc("class", "Shows only on characters of the ticked classes"),
         get = function(_, item) return tContains(ClassList(t.class), item) end,
         set = function(_, item, on)
           local list = CopyTable(ClassList(t.class))
@@ -1121,22 +1122,20 @@ local function SharedTabs(t, isDisplay, extra)
       },
       combat = {
         type = "select", order = 1, name = Label("combat", "Combat state"),
-        desc = Desc("combat", "Shows only in combat, only out of combat, or either."),
+        desc = Desc("combat"),
         values = { always = "Any", ["in"] = "In combat", out = "Out of combat" },
         sorting = { "always", "in", "out" },
         get = function() return t.combat or "always" end,
         -- A display saves "always" so it can override a group's in/out.
         set = function(_, value) Set("combat", (value ~= "always" or isDisplay) and value or nil) end,
       },
-      resting = ThreeWay("resting", 1.01, "Resting state", "Resting", "Not resting",
-        "Shows only while resting (in an inn or city), only while not, or either."),
-      mounted = ThreeWay("mounted", 1.02, "Mounted state", "Mounted", "Not mounted",
-        "Shows only while mounted, only while not, or either."),
+      resting = ThreeWay("resting", 1.01, "Resting state", "Resting", "Not resting"),
+      mounted = ThreeWay("mounted", 1.02, "Mounted state", "Mounted", "Not mounted"),
       breakState = Break(1.05),
       nameplateUnits = {
         type = "select", order = 1.1, name = Label("nameplateUnits", "Which nameplates"),
         desc = Desc("nameplateUnits", "Friendly nameplates only appear outside instances, and only with friendly "
-          .. "nameplates turned on in the game's options."),
+          .. "nameplates turned on in the game's options"),
         values = { enemy = "Enemies", friendly = "Friendly", all = "Both" },
         hidden = function()
           local target = t.target
@@ -1148,7 +1147,7 @@ local function SharedTabs(t, isDisplay, extra)
       },
       knownSpell = {
         type = "input", order = 1.92, name = Label("knownSpell", "Only if you know spell"),
-        desc = Desc("knownSpell", "Spell IDs separated by commas. Shows once you know any of them, e.g. 588 for "
+        desc = Desc("knownSpell", "Separate IDs with commas. Shows once you know any of them, e.g. 588 for "
           .. "Inner Fire. Put ! before an ID to show only while you don't know it: !588. Leave empty to show either way."),
         -- Saved as one ID or a list; negative for !.
         get = function()
@@ -1180,8 +1179,8 @@ local function SharedTabs(t, isDisplay, extra)
       },
       breakSpell = Break(1.97),
       hideWhenPlayerDead = Toggle("hideWhenPlayerDead", 3.55, "Hide while you're dead",
-        "Hides while you're dead or a ghost."),
-      neverLoad = Toggle("neverLoad", 3.6, "Never load", "Turns this off without deleting it."),
+        "Hides while you're dead or a ghost"),
+      neverLoad = Toggle("neverLoad", 3.6, "Never load", "Turns this off without deleting it"),
     },
   }
 
@@ -1189,8 +1188,8 @@ local function SharedTabs(t, isDisplay, extra)
   local unit = {
     type = "group", inline = true, order = 2, name = "Hide a unit's icons when",
     args = {
-      hideWhenDead = Toggle("hideWhenDead", 1, "Dead", "Hides a unit's icons while that unit is dead."),
-      hideWhenOffline = Toggle("hideWhenOffline", 2, "Offline", "Hides a unit's icons while that player is offline."),
+      hideWhenDead = Toggle("hideWhenDead", 1, "Dead", "Hides a unit's icons while that unit is dead"),
+      hideWhenOffline = Toggle("hideWhenOffline", 2, "Offline", "Hides a unit's icons while that player is offline"),
       break0 = Break(2.9),
       hideWhenNotVisible = {
         type = "select", order = 3, name = Label("hideWhenNotVisible", "Out of sight"),
@@ -1215,7 +1214,7 @@ local function SharedTabs(t, isDisplay, extra)
         type = "multiselect", order = 4, width = "full", values = POWER_VALUES,
         name = Label("unitPower", "Power types (none ticked: any)"),
         desc = Desc("unitPower", "Shows only on units using a ticked power. A druid in cat or bear form uses "
-          .. "energy or rage. None ticked: any power."),
+          .. "energy or rage."),
         get = function(_, item) return tContains(t.unitPower or {}, item) end,
         -- A display keeps an empty list so it can override a group's.
         set = function(_, item, on)
@@ -1239,9 +1238,9 @@ local function SharedTabs(t, isDisplay, extra)
     },
   }
 
-  look.args.tint.desc = Desc("tint", "The color the icon art is tinted.")
+  look.args.tint.desc = Desc("tint", "The color the icon art is tinted")
   look.args.glowMode.desc = Desc("glow", "Blizzard's proc glow around each icon. It reaches about a fifth of the icon's size past each edge, so tight spacing lets it overlap the next icon.")
-  look.args.glow.desc = Desc("glow", "The glow's color.")
+  look.args.glow.desc = Desc("glow", "The glow's color")
   Resettable(look.args.sort, "sort")
   Resettable(look.args.tintMode, "tint")
   look.args.skin.desc = Desc("skin", "Masque: the frame from the skin you pick for this group in Masque's options. "
@@ -1253,7 +1252,7 @@ local function SharedTabs(t, isDisplay, extra)
   look.args.borderStyle.desc = Desc("borderStyle", "Blizzard: the game's soft border art. Plain: a solid outline "
     .. "in the exact color, as wide as Border width.")
   Resettable(look.args.borderStyle, "borderStyle")
-  look.args.borderColor.desc = Desc("borderColor", "The border's color.")
+  look.args.borderColor.desc = Desc("borderColor", "The border's color")
   Resettable(look.args.borderColor, "borderColor")
   look.args.borderWidth.hidden = function()
     return not HasAnyBorder() or IsMasque() or t.borderStyle ~= "plain"
@@ -1390,7 +1389,6 @@ local function ShareBlock(args, state, order, spec)
   if spec.export then
     args.shareExportBox = {
       type = "input", order = order + 1, width = "full", name = spec.export.label, arg = { selectAll = true },
-      desc = "Click in the box, press Ctrl+A to select all, then Ctrl+C to copy.",
       hidden = function() return state.open ~= "export" end,
       get = spec.export.text,
       set = function() end,
@@ -1435,7 +1433,7 @@ local function ShareBlock(args, state, order, spec)
     type = "description", order = order + 1.91, width = "full", fontSize = "medium",
     name = function()
       local groups = PendingGroups()
-      return groups and ("Found %d total groups:"):format(#groups) or ""
+      return groups and ("Found %s:"):format(Count(#groups, "group", "groups")) or ""
     end,
     hidden = function() return not PendingGroups() end,
   }
@@ -1540,7 +1538,7 @@ local function AddTopShare(args, order, suite)
     end
     state.pending = { kind = "config", groups = groups }
     -- The group list shows under this (shareHeading, shareList).
-    Say(state, "|cffff4040Confirm config import|r", "ask")
+    Say(state, "Confirm config import", "ask")
     return true
   end
   local function ImportGroup(text)
@@ -1574,7 +1572,7 @@ local function AddTopShare(args, order, suite)
         label = "Paste a full config here, then click Accept. Then choose what to replace or add.",
         onText = ImportConfig,
       },
-      { key = "group", button = "Import a group", label = "Paste one group here, then click Accept to add it.", onText = ImportGroup },
+      { key = "group", button = "Import a group", label = "Paste one group here, then click Accept to add it", onText = ImportGroup },
     }
   end
   ShareBlock(args, state, order, {
@@ -1646,7 +1644,7 @@ local function DisplayImport(args, group, order, width)
     imports = {
       {
         key = "display", button = "Import display",
-        label = "Paste one display here, then click Accept to add it to the end of this group.",
+        label = "Paste one display here, then click Accept to add it to the end of this group",
         onText = function(text)
           local display, problem = ns.Share.Import(text, "display")
           if not display then
@@ -1713,7 +1711,7 @@ local function DisplayShareTab(group, display, index)
     moveToBreak = Break(0.2),
   }, state, 1, {
     export = {
-      button = "Export this display", label = "This display as text",
+      button = "Export", label = "This display as text",
       text = function() return ns.Share.ExportDisplay(display, state.withGroup) end,
     },
     imports = {
@@ -1761,12 +1759,7 @@ local function DispelTypesBox(display)
   end
   table.insert(entries, { "None", "No type" })
 
-  local args = {
-    intro = {
-      type = "description", order = 0, width = "full",
-      name = "Tick none to show every type.",
-    },
-  }
+  local args = {}
   for i, entry in ipairs(entries) do
     local key = entry[1]
     args[key] = {
@@ -1787,7 +1780,7 @@ local function DispelTypesBox(display)
       args["break" .. i] = Break(i + 0.5)
     end
   end
-  return { type = "group", inline = true, order = 6.5, name = "Dispel types", args = args }
+  return { type = "group", inline = true, order = 6.5, name = "Dispel types (none ticked: any)", args = args }
 end
 
 -- `index`: the display's place in the group's list, line breaks included,
@@ -1853,7 +1846,7 @@ local function DisplayOptions(group, display, index, number)
         validate = function(_, value)
           local seconds = tonumber(value)
           if strtrim(value) ~= "" and not (seconds and seconds >= 1 and seconds <= 86400) then
-            return "Enter a number of seconds, or leave it empty."
+            return "Enter a number of seconds, or leave it empty"
           end
           return true
         end,
@@ -1968,7 +1961,7 @@ local function DisplayOptions(group, display, index, number)
           mode = {
             type = "select", order = 5.2, name = "Shows", values = MODES,
             desc = function()
-              return ("\"Icon when none match\" draws at the end of its %s, after the %s's other icons.")
+              return ("\"Icon when none match\" draws at the end of its %s, after the %s's other icons")
                   :format(RowWord(group), RowWord(group))
             end,
             get = function() return display.mode end,
@@ -2102,7 +2095,7 @@ local function LineControls(group)
   local args = {
     growth = {
       type = "select", order = 1, name = "Grow", values = GROWTHS, sorting = GROWTH_ORDER,
-      desc = "The direction new icons are added in. Centered keeps each line centered on the anchor.",
+      desc = "The direction new icons are added in",
       get = growthGet, set = growthSet,
     },
     lines = {
@@ -2126,7 +2119,7 @@ local function LineControls(group)
     lineSpacing = {
       type = "range", order = 3, min = 0, max = 40, step = 1,
       name = function() return Capital(RowWord(group)) .. " spacing" end,
-      desc = function() return ("Gap between %s."):format(RowWord(group, true)) end,
+      desc = function() return ("Gap between %s"):format(RowWord(group, true)) end,
       get = function() return group.lineSpacing end,
       set = function(_, value)
         group.lineSpacing = value
@@ -2137,7 +2130,7 @@ local function LineControls(group)
     firstLine = {
       type = "toggle", order = 4, width = 1.5,
       name = function() return ("Show only the first %s"):format(RowWord(group)) end,
-      desc = function() return ("Shows only the first %s with icons, hides the rest."):format(RowWord(group)) end,
+      desc = function() return ("Shows only the first %s with icons, hides the rest"):format(RowWord(group)) end,
       -- Lines shared by several units keep their height, so nothing moves up.
       hidden = function() return not ns.SingleRow(group) end,
       get = function() return group.firstLine == true end,
@@ -2191,15 +2184,15 @@ local function LayoutBoxes(group)
         get = frameGet, set = frameSet,
       },
       break2 = Break(5.9),
-      point = AnchorPoint(1, 6, "Group's point", "The point on the group that's attached."),
-      relativePoint = AnchorPoint(3, 7, "To the frame's", "The point on the frame the group attaches to."),
+      point = AnchorPoint(1, 6, "Group's point", "The point on the group that's attached"),
+      relativePoint = AnchorPoint(3, 7, "To the frame's", "The point on the frame the group attaches to"),
       break3 = Break(7.9),
-      x = AnchorRange(4, 8, "X", "Moves the group right (positive) or left (negative), in pixels."),
-      y = AnchorRange(5, 9, "Y", "Moves the group up (positive) or down (negative), in pixels."),
+      x = AnchorRange(4, 8, "X", "Moves the group right (positive) or left (negative), in pixels"),
+      y = AnchorRange(5, 9, "Y", "Moves the group up (positive) or down (negative), in pixels"),
       break4 = Break(9.9),
       layer = {
         type = "range", order = 10, name = "Layer", min = 0, max = 10, step = 1,
-        desc = "When groups overlap on one frame, the higher layer draws on top.",
+        desc = "When groups overlap on one frame, the higher layer draws on top",
         get = function() return group.layer end,
         set = function(_, value)
           group.layer = value > 0 and value or nil
@@ -2230,8 +2223,7 @@ local function UnitsSelect(group, order)
   end
   return {
     type = "multiselect", order = order, width = 1.25, name = "Units", dialogControl = "Dropdown",
-    desc = "Which units this group shows icons for. Anchored to each unit's own frame, every unit gets a row there. "
-        .. "Anchored to the screen or a named frame, the units share one row in this order.",
+    desc = "Which units this group shows displays for",
     values = values,
     get = function(_, i) return tContains(AsList(), TARGETS[i][1]) end,
     set = function(_, i, on)
@@ -2304,13 +2296,13 @@ local function GroupOptions(group, index)
     args = {
       name = {
         type = "input", order = 3.1, width = 1.25, name = "Name",
-        desc = "The group's name in this list and in Masque's options.",
+        desc = "The group's name in this list and in Masque's options",
         validate = function(_, value)
           if value == "" then
-            return "Give it a name."
+            return "Give it a name"
           end
           local other = GroupByName(value)
-          return (other == nil or other == group) or "Another group has that name."
+          return (other == nil or other == group) or "Another group has that name"
         end,
         get = function() return group.name or "" end,
         set = function(_, value)
@@ -2424,7 +2416,7 @@ local function GroupOptions(group, index)
   local function TreeDesc()
     local parts = {}
     if ns.FirstLineConflict(group) then
-      table.insert(parts, FirstLineTitle(group) .. ".")
+      table.insert(parts, FirstLineTitle(group))
     end
     local why = GroupNotLoadedText(group)
     if why then
@@ -2446,7 +2438,7 @@ end
 
 local function Status()
   if NeedsReload() then
-    return "|cffff9933After large amounts of edits it is recommended you /reload to clean up unused frames.|r"
+    return "|cffff9933Type /reload to free up memory from unused frames after many edits|r"
   end
   return ""
 end
@@ -2576,7 +2568,7 @@ local function Options()
     newGroup = { type = "execute", order = 2, name = "New group", func = function() NewGroup() end },
     testMode = {
       type = "execute", order = 2.5, name = "Test mode",
-      desc = "Preview your groups with sample icons. Unavailable in combat and PvP matches.",
+      desc = "Opens test mode. Unavailable in combat and PvP matches.",
       func = function() ns.OpenTest() end,
       disabled = function() return ns.TestLocked() end,
     },
@@ -2794,7 +2786,7 @@ local function TestOptions()
     for i, group in ipairs(list) do
       box["g" .. group.id] = {
         type = "toggle", order = i, width = "full", name = group.name or ("Group " .. group.id),
-        desc = "Shows this group with sample icons while test mode is open.",
+        desc = "Shows this group with sample icons while test mode is open",
         get = function() return ns.IsTested(group) end,
         set = function(_, value) ns.SetTested(group, value) end,
       }
