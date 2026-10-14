@@ -2229,7 +2229,7 @@ local function UnitsSelect(group, order)
     values[i] = entry[2]
   end
   return {
-    type = "multiselect", order = order, width = 1.5, name = "Units", dialogControl = "Dropdown",
+    type = "multiselect", order = order, width = 1.25, name = "Units", dialogControl = "Dropdown",
     desc = "Which units this group shows icons for. Anchored to each unit's own frame, every unit gets a row there. "
         .. "Anchored to the screen or a named frame, the units share one row in this order.",
     values = values,
@@ -2303,7 +2303,7 @@ local function GroupOptions(group, index)
     type = "group", inline = true, order = 0, name = "",
     args = {
       name = {
-        type = "input", order = 3.1, width = 1.5, name = "Name",
+        type = "input", order = 3.1, width = 1.25, name = "Name",
         desc = "The group's name in this list and in Masque's options.",
         validate = function(_, value)
           if value == "" then
