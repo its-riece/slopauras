@@ -150,6 +150,9 @@ below.
   window is ignored), is built as one container of aura slots (`Chain.NewStack`,
   `AddAuraSlot`): one button per display where an aura group makes ten. The slots sit on
   one spot, earlier displays on top, so it shows what the first-line window would.
+  Set initial slot anchors and frame levels inside `initializeFrame`, before
+  styling makes children and Blizzard applies aura-secret access restrictions.
+  `LevelSlots` adjusts reused slots only during resizing outside secrecy.
   Whether a group qualifies is part of `BuildFlags`, since the edits that change it (Max
   icons shown, icon size) are sent as look changes.
 - **Displays that can't show on this character aren't built** (`Builds`: Never load, a

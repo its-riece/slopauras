@@ -1,0 +1,1 @@
+SlopAuras:1:group:{"name":"QA priority stack","target":["player"],"anchorTo":"screen","anchor":{"point":"CENTER","relativePoint":"CENTER","x":160,"y":0},"growth":"RIGHT","firstLine":true,"size":48,"max":1,"displays":[{"name":"Shield first","rankSpellIDs":[17]},{"mode":"break"},{"name":"Other buff fallback","filter":"HELPFUL"}]}
