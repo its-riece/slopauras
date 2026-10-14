@@ -215,6 +215,51 @@ local function UniqueName(base)
   return name
 end
 
+-- Suites ---------------------------------------------------------------------
+-- A suite (the editor calls it a bundle) is only a name on its groups
+-- (`group.suite`): it exists while a group has it, and holds no settings. Its tree node is keyed "s:<name>"; the
+-- colon keeps it apart from the root's own option keys.
+
+local function SuiteKey(name)
+  return "s:" .. name
+end
+
+-- The options path to a group's page, followed by `...`.
+local function GroupPath(group, ...)
+  local path = { "g" .. group.id, ... }
+  if group.suite then
+    table.insert(path, 1, SuiteKey(group.suite))
+  end
+  return path
+end
+
+local function OpenPage(group, ...)
+  AceConfigDialog:SelectGroup(addonName, unpack(GroupPath(group, ...)))
+end
+
+local function Suites()
+  local seen, list = {}, {}
+  for _, group in ipairs(ns.groups) do
+    if group.suite and not seen[group.suite] then
+      seen[group.suite] = true
+      table.insert(list, group.suite)
+    end
+  end
+  table.sort(list, function(a, b) return a:lower() < b:lower() end)
+  return list
+end
+
+-- A suite's groups in name order; with no name, the groups in no suite.
+local function SuiteGroups(name)
+  local list = {}
+  for _, group in ipairs(SortedGroups()) do
+    if group.suite == name then
+      table.insert(list, group)
+    end
+  end
+  return list
+end
+
 -- Displays -------------------------------------------------------------------
 
 -- Whether the display at list index `index` starts a line that can wrap
@@ -399,102 +444,126 @@ local function ClassList(value)
   return value or {}
 end
 
+-- Not loaded -------------------------------------------------------------------
+-- What isn't built on this character (ns.NotBuiltReason) is gray in the tree,
+-- with the reason on hover. Show/hide conditions (combat, resting...) don't
+-- count: those displays are built.
+
+local GRAY = "|cff808080%s|r"
+-- A group's own tree entries (Shared display settings, Displays), apart from
+-- the group and display names around them.
+local SECTION = "|cff88aaff%s|r"
+
+-- A spell as its icon and name, for the reasons below.
+local function SpellLabel(id)
+  local texture = C_Spell.GetSpellTexture(id)
+  local name = C_Spell.GetSpellName(id) or tostring(id)
+  return texture and ("|T%s:14|t %s"):format(texture, name) or name
+end
+
+local function Bullets(items)
+  return "\n• " .. table.concat(items, "\n• ")
+end
+
+-- The classes a display or group loads for, each with its class icon
+-- (GetClassAtlas, SharedConstants.lua) and name in its class color.
+-- `inline`: one line, for the group's list.
+local function ClassesReason(value, inline)
+  local names = ClassValues()
+  local items = {}
+  for _, class in ipairs(ClassList(value)) do
+    table.insert(items, ("|A:classicon-%s:14:14|a %s"):format(class:lower(), names[class] or class))
+  end
+  if inline then
+    return "loads for " .. table.concat(items, ", ")
+  end
+  return "Loads for classes:" .. Bullets(items)
+end
+
+-- Why a display isn't built, or nil when it is. `inline`: one line, for the
+-- group's list; otherwise the spells go in a bulleted list.
+local function NotLoadedText(display, inline)
+  local reason = ns.NotBuiltReason(display)
+  if reason == "never" then
+    return "Never load is on"
+  elseif reason == "class" then
+    return ClassesReason(display.class, inline)
+  elseif reason ~= "spell" then
+    return nil
+  end
+  -- Either a spell marked ! is known, or none of the required ones is
+  -- (KnowsSpells in SlopAuras.lua).
+  local spell, known, missing = display.knownSpell, {}, {}
+  for _, id in ipairs(type(spell) == "table" and spell or { spell }) do
+    if id < 0 and C_SpellBook.IsSpellKnown(-id) then
+      table.insert(known, SpellLabel(-id))
+    elseif id > 0 then
+      table.insert(missing, SpellLabel(id))
+    end
+  end
+  if #known > 0 then
+    if inline then
+      return "you know " .. table.concat(known, " and ")
+    end
+    return (#known == 1 and "You know an excluded spell:" or "You know excluded spells:") .. Bullets(known)
+  end
+  if inline then
+    return "you don't know " .. table.concat(missing, " or ")
+  end
+  return (#missing == 1 and "You don't know the required spell:" or "You don't know any of the required spells:")
+      .. Bullets(missing)
+end
+
+-- The tree hover for a group where nothing is built, or nil while something
+-- is: a bullet per display with its reason. A group with no displays yet isn't
+-- gray. The group's own class rules out the whole group, whatever its
+-- displays say (ComputeRows).
+local function GroupNotLoadedText(group)
+  if not ns.ClassAllowed(group) then
+    return "Not loaded. " .. ClassesReason(group.class)
+  end
+  local lines = {}
+  for number, display in ns.Displays(group) do
+    local why = NotLoadedText(display, true)
+    if not why then
+      return nil
+    end
+    table.insert(lines, ("%s: %s"):format(DisplayName(display, number), why))
+  end
+  return #lines > 0 and "Not loaded:" .. Bullets(lines) or nil
+end
+
 -- AceConfigDialog flows controls left to right and wraps where they run out of
 -- room. A full-width empty description forces a new row.
 local function Break(order)
   return { type = "description", order = order, name = "", width = "full" }
 end
 
--- Icons for Link as inline escapes, from art this client's own UI uses (the
--- arrows are the action bar's page buttons, MainActionBar.xml).
--- Inline icons sit 2px below the capitals' center in GameFontNormal, so they're
--- raised by LINK_ICON_RAISE (the escapes' y offset).
-local LINK_ICON_SIZE, LINK_ICON_RAISE = 16, 2
-local function AtlasIcon(atlas)
-  return ("|A:%s:%d:%d:0:%d|a"):format(atlas, LINK_ICON_SIZE, LINK_ICON_SIZE, LINK_ICON_RAISE)
-end
-local function FileIcon(path)
-  return ("|T%s:%d:%d:0:%d|t"):format(path, LINK_ICON_SIZE, LINK_ICON_SIZE, LINK_ICON_RAISE)
-end
-local LINK_ICONS = {
-  up = AtlasIcon("ui-hud-actionbar-pageuparrow-up"),
-  down = AtlasIcon("ui-hud-actionbar-pagedownarrow-up"),
-  duplicate = FileIcon("Interface\\Buttons\\UI-PlusButton-Up"),
-  delete = FileIcon("Interface\\Buttons\\UI-GroupLoot-Pass-Up"),
-}
-
--- A clickable line of text in place of a button, for secondary actions: an
--- InteractiveLabel in GameFontNormal (the stock label is GameFontHighlightSmall,
--- AceGUIWidget-Label.lua), gold, white while hovered. Its own widget type
--- because AceGUI pools widgets by type and doesn't reset font or color on
--- acquire, so a changed stock label would turn up in other addons' panels.
--- The color is set on the font string, not with an escape, so hover can
--- change it; inline icon escapes keep their own colors.
-local LINK = "SlopAuras-Link"
-local LINK_FONT = "GameFontNormal"
-do
-  local AceGUI = LibStub("AceGUI-3.0")
-  AceGUI:RegisterWidgetType(LINK, function()
-    local link = AceGUI.WidgetRegistry["InteractiveLabel"]()
-    link.type = LINK
-    local function Color()
-      if link.disabled then
-        link.label:SetTextColor(0.5, 0.5, 0.5)
-      elseif link.hovered then
-        link.label:SetTextColor(1, 1, 1)
-      else
-        link.label:SetTextColor(1, 0.82, 0)
-      end
-    end
-    link.frame:HookScript("OnEnter", function()
-      link.hovered = true
-      Color()
-    end)
-    link.frame:HookScript("OnLeave", function()
-      link.hovered = false
-      Color()
-    end)
-    local SetDisabled, OnAcquire = link.SetDisabled, link.OnAcquire
-    function link.SetDisabled(self, disabled)
-      SetDisabled(self, disabled)
-      Color()
-    end
-    function link.OnAcquire(self)
-      self.hovered = false
-      OnAcquire(self)
-      self:SetFontObject(_G[LINK_FONT])
-      Color()
-    end
-    return link
-  end, 1)
-end
-
--- The icon is inline: the label only puts its own image beside the text with
--- 200px to spare, and AceConfigDialog's `image` path calls SetLabel, which
--- InteractiveLabel lacks. Each link is as wide as its text, measured in
--- LINK_FONT, plus the icon and a fixed gap. `extra` adds option fields
--- (confirm).
-local measure
-local function LinkWidth(text)
-  if not measure then
-    measure = UIParent:CreateFontString(nil, "BACKGROUND", LINK_FONT)
-    measure:Hide()
-  end
-  measure:SetText(text)
-  return (measure:GetStringWidth() + LINK_ICON_SIZE + 4 + 16) / 170
-end
-
--- `desc` is required: without one the tooltip would just repeat the text.
-local function Link(order, icon, text, desc, func, extra)
-  local option = {
-    type = "execute", order = order, width = LinkWidth(text), dialogControl = LINK,
-    name = ("%s %s"):format(LINK_ICONS[icon], text),
-    desc = desc, func = func,
-  }
+-- A button in a page's toolbar. Without `desc` its tooltip is just its name.
+-- `extra` adds option fields (confirm, disabled).
+local function Button(order, width, text, desc, func, extra)
+  local option = { type = "execute", order = order, width = width, name = text, desc = desc, func = func }
   for key, value in pairs(extra or {}) do
     option[key] = value
   end
   return option
+end
+
+-- The confirm prompt for something that deletes: AceConfigDialog puts it in a
+-- plain FontString (confirmPopup), so it takes an inline icon, color and lines.
+local function DeletePrompt(title, body)
+  return "|TInterface\\DialogFrame\\UI-Dialog-Icon-AlertNew:32|t\n|cffff4040" .. title .. "|r\n\n" .. body
+end
+
+-- A dropdown entry that does something (makes a new group or suite) instead
+-- of picking one of the listed values: gold, with a "+", and last in the list,
+-- after the values (None counts as one).
+local function ActionEntry(text)
+  return "|cffffd100+ " .. text .. "|r"
+end
+
+local function Count(n, one, many)
+  return ("%d %s"):format(n, n == 1 and one or many)
 end
 
 -- Filter picker ---------------------------------------------------------------
@@ -1308,14 +1377,11 @@ local function ShareBlock(args, state, order, spec)
       Refresh()
     end
   end
-
   if spec.export then
-    args.shareExport = { type = "execute", order = order, width = spec.width, name = spec.export.button, func = Open("export") }
+    args.shareExport = Button(order, spec.width, spec.export.button, nil, Open("export"))
   end
   for i, import in ipairs(spec.imports) do
-    args["shareImport" .. i] = {
-      type = "execute", order = order + i / 10, width = spec.width, name = import.button, func = Open(import.key),
-    }
+    args["shareImport" .. i] = Button(order + i / 10, spec.width, import.button, import.desc, Open(import.key))
   end
   args.shareButtonsBreak = Break(order + 0.9)
 
@@ -1389,8 +1455,11 @@ local function ShareBlock(args, state, order, spec)
 end
 
 -- Adds imported groups, each with a new id. A name already taken either
--- replaces that group in place or gets a number added.
-local function AddGroups(groups, replaceSameName)
+-- replaces that group in place or gets a number added. `suite`: the suite
+-- they go into (an import on a suite's page); otherwise each keeps the suite
+-- its string names, and a replacing group without one keeps the suite of the
+-- one it replaces.
+local function AddGroups(groups, replaceSameName, suite)
   for _, group in ipairs(groups) do
     group.id = ns.NewGroupID()
     ns.Prepare(group)
@@ -1401,8 +1470,10 @@ local function AddGroups(groups, replaceSameName)
       end
     end
     if index and replaceSameName then
+      group.suite = suite or group.suite or ns.groups[index].suite
       ns.groups[index] = group
     else
+      group.suite = suite or group.suite
       group.name = UniqueName(group.name)
       table.insert(ns.groups, group)
     end
@@ -1440,7 +1511,7 @@ local function ChoiceButton(state, kind, order, label, func, confirmText)
   }
 end
 
-local function OfferAdd(state, groups)
+local function OfferAdd(state, groups, suite)
   local clashes = Clashes(groups)
   if #clashes > 0 then
     state.pending = { kind = "clash", groups = groups, count = #clashes }
@@ -1452,54 +1523,76 @@ local function OfferAdd(state, groups)
         :format(Names(clashes)), "ask")
     end
   else
-    AddGroups(groups, false)
+    AddGroups(groups, false, suite)
   end
 end
 
--- For the main page: the full config, or one group.
-local function AddTopShare(args, order)
-  local state = ShareState("top")
-  ShareBlock(args, state, order, {
-    export = {
-      button = "Export full config", label = "Full config as text",
-      text = function() return ns.Share.ExportConfig() end,
-    },
+-- For the main page: the full config, or one group. With `suite`, for that
+-- suite's page: its groups as a config string, and imports that go into it
+-- (no Replace all my groups there).
+local function AddTopShare(args, order, suite)
+  local state = ShareState(suite and SuiteKey(suite) or "top")
+  local function ImportConfig(text)
+    local groups, problem = ns.Share.Import(text, "config")
+    if not groups then
+      Say(state, problem, "error")
+      return false
+    end
+    state.pending = { kind = "config", groups = groups }
+    -- The group list shows under this (shareHeading, shareList).
+    Say(state, "|cffff4040Confirm config import|r", "ask")
+    return true
+  end
+  local function ImportGroup(text)
+    local group, problem = ns.Share.Import(text, "group")
+    if not group then
+      Say(state, problem, "error")
+      return false
+    end
+    OfferAdd(state, { group }, suite)
+    return true
+  end
+  local imports
+  if suite then
+    -- One Import: the string says whether it's a group or a config (a suite's
+    -- export is a config). Anything else goes to the config check, whose
+    -- error names what was pasted.
+    imports = { {
+      key = "any", button = "Import", desc = "Import a group, a full config or another bundle",
+      label = "Paste a bundle, a full config or one group here",
+      onText = function(text)
+        if strtrim(text):match("^SlopAuras:%d+:(%a+):") == "group" then
+          return ImportGroup(text)
+        end
+        return ImportConfig(text)
+      end,
+    } }
+  else
     imports = {
       {
         key = "all", button = "Import full config",
         label = "Paste a full config here, then click Accept. Then choose what to replace or add.",
-        onText = function(text)
-          local groups, problem = ns.Share.Import(text, "config")
-          if not groups then
-            Say(state, problem, "error")
-            return false
-          end
-          state.pending = { kind = "config", groups = groups }
-          -- The group list shows under this (shareHeading, shareList).
-          Say(state, "|cffff4040Confirm config import|r", "ask")
-          return true
-        end,
+        onText = ImportConfig,
       },
-      {
-        key = "group", button = "Import a group",
-        label = "Paste one group here, then click Accept to add it.",
-        onText = function(text)
-          local group, problem = ns.Share.Import(text, "group")
-          if not group then
-            Say(state, problem, "error")
-            return false
-          end
-          OfferAdd(state, { group })
-          return true
-        end,
-      },
+      { key = "group", button = "Import a group", label = "Paste one group here, then click Accept to add it.", onText = ImportGroup },
+    }
+  end
+  ShareBlock(args, state, order, {
+    width = suite and 0.7,
+    export = {
+      button = suite and "Export" or "Export full config",
+      label = suite and "This bundle as text" or "Full config as text",
+      text = function() return ns.Share.ExportConfig(suite and SuiteGroups(suite)) end,
     },
+    imports = imports,
   })
-  args.shareReplaceAll = ChoiceButton(state, "config", order + 2, "Replace all my groups", function(pending)
-    ReplaceAllGroups(pending.groups)
-  end, "Delete all your groups and use the imported ones?")
+  if not suite then
+    args.shareReplaceAll = ChoiceButton(state, "config", order + 2, "Replace all my groups", function(pending)
+      ReplaceAllGroups(pending.groups)
+    end, DeletePrompt("Replace all your groups?", "Replaces all your groups and bundles. You cannot undo this."))
+  end
   args.shareReplaceMatching = ChoiceButton(state, "config", order + 2.05, "Update existing", function(pending)
-    AddGroups(pending.groups, true)
+    AddGroups(pending.groups, true, suite)
   end)
   args.shareReplaceMatching.desc = "Replaces your groups that share a name with an imported one. Adds the rest."
   -- Without a name clash it would do the same as Add as new groups.
@@ -1508,13 +1601,13 @@ local function AddTopShare(args, order)
     return configOnly() or #Clashes(state.pending.groups) == 0
   end
   args.shareAddAll = ChoiceButton(state, "config", order + 2.1, "Add as new groups", function(pending)
-    OfferAdd(state, pending.groups)
+    OfferAdd(state, pending.groups, suite)
   end)
   args.shareReplaceSame = ChoiceButton(state, "clash", order + 2.2, "Replace it", function(pending)
-    AddGroups(pending.groups, true)
+    AddGroups(pending.groups, true, suite)
   end)
   args.shareKeepBoth = ChoiceButton(state, "clash", order + 2.3, "Add as a copy", function(pending)
-    AddGroups(pending.groups, false)
+    AddGroups(pending.groups, false, suite)
   end)
   local function Plural(single, plural)
     return function() return state.pending and (state.pending.count or 1) > 1 and plural or single end
@@ -1534,9 +1627,9 @@ end
 
 -- The group's Export button, in its button row from `order` on; the box
 -- opens under the row.
-local function GroupExport(args, group, order, width)
+local function GroupExport(args, group, order)
   ShareBlock(args, ShareState(group), order, {
-    width = width,
+    width = 0.7,
     export = {
       button = "Export", label = "This group as text",
       text = function() return ns.Share.ExportGroup(group) end,
@@ -1563,7 +1656,7 @@ local function DisplayImport(args, group, order, width)
           table.insert(group.displays, display)
           ns.Prepare(group)
           Changed(true)
-          AceConfigDialog:SelectGroup(addonName, "g" .. group.id, "displays", "d" .. #group.displays)
+          OpenPage(group, "displays", "d" .. #group.displays)
           return true
         end,
       },
@@ -1607,7 +1700,7 @@ local function MoveToGroup(group, display, index, order)
       table.insert(target.displays, display)
       ns.Prepare(target)
       Changed(true)
-      AceConfigDialog:SelectGroup(addonName, key, "displays", "d" .. #target.displays)
+      OpenPage(target, "displays", "d" .. #target.displays)
     end,
   }
 end
@@ -1706,7 +1799,7 @@ local function DisplayOptions(group, display, index, number)
   -- follow the display to its new key.
   local function MoveDisplay(by)
     if Move(list, index, by) then
-      AceConfigDialog:SelectGroup(addonName, "g" .. group.id, "displays", "d" .. (index + by))
+      OpenPage(group, "displays", "d" .. (index + by))
     end
   end
 
@@ -1849,7 +1942,14 @@ local function DisplayOptions(group, display, index, number)
 
   return {
     type = "group", order = 100 + index, childGroups = "tab",
-    name = function() return DisplayName(display, number) end,
+    name = function()
+      local name = DisplayName(display, number)
+      return NotLoadedText(display) and GRAY:format(name) or name
+    end,
+    desc = function()
+      local why = NotLoadedText(display)
+      return why and "Not loaded. " .. why
+    end,
     args = {
       -- Drawn above the tabs: no box or title (unnamed inline group).
       actions = {
@@ -1878,18 +1978,22 @@ local function DisplayOptions(group, display, index, number)
             end,
           },
           nameRow = Break(5.5),
-          up = Link(1, "up", "Move up", "Moves this display up one", function() MoveDisplay(-1) end),
-          down = Link(2, "down", "Move down", "Moves this display down one", function() MoveDisplay(1) end),
-          duplicate = Link(3, "duplicate", "Duplicate", "Adds a copy below this one", function()
+          up = Button(1, 0.7, "Move up", nil, function() MoveDisplay(-1) end),
+          down = Button(2, 0.7, "Move down", nil, function() MoveDisplay(1) end),
+          duplicate = Button(3, 0.7, "Duplicate", nil, function()
             table.insert(list, index + 1, CopyTable(display))
             ns.Prepare(group)
             Changed(true)
-            AceConfigDialog:SelectGroup(addonName, "g" .. group.id, "displays", "d" .. (index + 1))
+            OpenPage(group, "displays", "d" .. (index + 1))
           end),
-          delete = Link(4, "delete", "Delete display", "Removes this display", function()
+          delete = Button(4, 0.8, "Delete display", nil, function()
             table.remove(list, index)
             Changed(true)
-          end, { confirm = function() return ("Delete %s?"):format(DisplayLabel(display)) end }),
+          end, {
+            confirm = function()
+              return DeletePrompt(("Delete %s?"):format(DisplayLabel(display)), "You cannot undo this.")
+            end,
+          }),
           breakActions = Break(4.5),
         },
       },
@@ -1908,23 +2012,23 @@ local function BreakOptions(group, index)
   local list = group.displays
   local function MoveBreak(by)
     if Move(list, index, by) then
-      AceConfigDialog:SelectGroup(addonName, "g" .. group.id, "displays", "b" .. (index + by))
+      OpenPage(group, "displays", "b" .. (index + by))
     end
   end
   return {
     type = "group", order = 100 + index, name = "|cff808080==============|r",
-    desc = "Line break",
+    desc = function() return ("Starts a new %s of displays"):format(RowWord(group)) end,
     args = {
       intro = {
         type = "description", order = 0, width = "full",
         name = function()
-          return ("Displays after this start a new %s."):format(RowWord(group))
+          return ("Starts a new %s of displays"):format(RowWord(group))
         end,
       },
       introBreak = Break(0.5),
-      up = Link(1, "up", "Move up", "Moves this line break up one", function() MoveBreak(-1) end),
-      down = Link(2, "down", "Move down", "Moves this line break down one", function() MoveBreak(1) end),
-      delete = Link(3, "delete", "Delete", function()
+      up = Button(1, 0.7, "Move up", nil, function() MoveBreak(-1) end),
+      down = Button(2, 0.7, "Move down", nil, function() MoveBreak(1) end),
+      delete = Button(3, 0.85, "Delete line break", function()
         return ("Removes this line break. The displays after it join the %s before."):format(RowWord(group))
       end, function()
         table.remove(list, index)
@@ -1936,10 +2040,11 @@ local function BreakOptions(group, index)
 end
 
 -- Groups ---------------------------------------------------------------------
--- A group is a leaf of the main tree with tabs; its displays are a second
--- tree inside its Displays tab. AceConfigDialog puts a node's child groups
--- either in the tree or in tabs (childGroups), never both, and draws a new
--- tree for a tree group whose parent is a tab (FeedGroup).
+-- A group is a node of the main tree: its page holds its own settings, and
+-- its children are Shared display settings and Displays, which holds the displays.
+-- AceConfigDialog puts a node's child groups either in the tree or in tabs
+-- (childGroups), never both, so the group page has no tabs; Shared display settings
+-- and each display have.
 
 local function Field(group, key, structural)
   return function() return group[key] end, function(_, value)
@@ -1982,16 +2087,16 @@ local function AddDisplay(group)
   table.insert(group.displays, { mode = "list", filter = last and rawget(last, "filter") })
   ns.Prepare(group)
   Changed(true)
-  AceConfigDialog:SelectGroup(addonName, "g" .. group.id, "displays", "d" .. #group.displays)
+  OpenPage(group, "displays", "d" .. #group.displays)
 end
 
 local function AddLineBreak(group)
   table.insert(group.displays, { mode = "break" })
   Changed(true)
-  AceConfigDialog:SelectGroup(addonName, "g" .. group.id, "displays", "b" .. #group.displays)
+  OpenPage(group, "displays", "b" .. #group.displays)
 end
 
--- The Lines section of a group's Layout tab.
+-- The Rows/Columns box on a group's page.
 local function LineControls(group)
   local growthGet, growthSet = Field(group, "growth", true)
   local args = {
@@ -2004,7 +2109,7 @@ local function LineControls(group)
       type = "select", order = 2,
       name = function() return ("New %s go"):format(RowWord(group, true)) end,
       desc = function()
-        return "Displays after a line break go this way: across from the way icons grow."
+        return ("Which direction %s go after a line break"):format(RowWord(group, true))
       end,
       values = function()
         if ns.Chain.Vertical(group.growth) then
@@ -2048,7 +2153,8 @@ local function LineControls(group)
   }
 end
 
-local function LayoutTab(group)
+-- The Rows/Columns and Anchor boxes on a group's page.
+local function LayoutBoxes(group)
   local function AnchorRange(slot, order, label, desc)
     local get, set = AnchorField(group, slot, 0)
     return {
@@ -2103,7 +2209,7 @@ local function LayoutTab(group)
     },
   }
 
-  return { type = "group", order = 2, name = "Layout", args = { lines = LineControls(group), anchor = anchor } }
+  return LineControls(group), anchor
 end
 
 -- The group's `target` list as a dropdown of checkboxes. Keys are TARGETS
@@ -2141,18 +2247,63 @@ local function UnitsSelect(group, order)
   }
 end
 
--- `index`: the group's place in name order (SortedGroups).
+-- A suite name not in use yet, from `base`.
+local function UniqueSuiteName(base)
+  local name, n = base, 1
+  while tContains(Suites(), name) do
+    n = n + 1
+    name = base .. " " .. n
+  end
+  return name
+end
+
+-- The group's suite: None, a suite in use, or New suite, which puts the group
+-- in a suite named "New bundle" and opens that suite's page to rename it.
+local function SuiteSelect(group, order)
+  return {
+    type = "select", order = order, name = "Bundle",
+    desc = "Bundle this group. Bundles can be tested or exported together",
+    values = function()
+      local values = { none = "None", new = ActionEntry("New bundle") }
+      for _, name in ipairs(Suites()) do
+        values[SuiteKey(name)] = name
+      end
+      return values
+    end,
+    sorting = function()
+      local keys = { "none" }
+      for _, name in ipairs(Suites()) do
+        table.insert(keys, SuiteKey(name))
+      end
+      table.insert(keys, "new")
+      return keys
+    end,
+    get = function() return group.suite and SuiteKey(group.suite) or "none" end,
+    set = function(_, key)
+      if key == "new" then
+        group.suite = UniqueSuiteName("New bundle")
+        Refresh()
+        AceConfigDialog:SelectGroup(addonName, SuiteKey(group.suite))
+        return
+      end
+      group.suite = key ~= "none" and key:sub(#SuiteKey("") + 1) or nil
+      Refresh()
+      OpenPage(group)
+    end,
+  }
+end
+
+-- `index`: the group's place in name order among its tree siblings.
 local function GroupOptions(group, index)
   local look, text, load = SharedTabs(group, false)
   look.order, text.order, load.order = 1, 2, 3
 
-  -- Above the group's tabs, so they show on every tab. An inline group with
-  -- no name is drawn without a box or title.
+  -- An inline group with no name is drawn without a box or title.
   local actions = {
     type = "group", inline = true, order = 0, name = "",
     args = {
       name = {
-        type = "input", order = 0.1, width = 1.5, name = "Name",
+        type = "input", order = 3.1, width = 1.5, name = "Name",
         desc = "The group's name in this list and in Masque's options.",
         validate = function(_, value)
           if value == "" then
@@ -2167,18 +2318,16 @@ local function GroupOptions(group, index)
           Changed(true)
         end,
       },
-      target = UnitsSelect(group, 0.2),
-      nameRow = Break(0.5),
-      testGroup = {
-        type = "execute", order = 1, width = 0.7, name = "Test group",
-        desc = "Preview this group with sample icons. Unavailable in combat and PvP matches.",
-        func = function() ns.OpenTest(group) end,
-        disabled = function() return ns.TestLocked() end,
-      },
-      duplicate = {
-        type = "execute", order = 1.1, width = 0.7, name = "Duplicate",
-        desc = "Adds a copy of this group and its displays. The copy sits on top of the original on screen until you move it.",
-        func = function()
+      target = UnitsSelect(group, 3.2),
+      suite = SuiteSelect(group, 3.3),
+      nameRow = Break(3.5),
+      -- Also on the Displays page, with Add line break and Import display.
+      addDisplay = Button(0.05, 0.75, "Add display", nil, function() AddDisplay(group) end),
+      testGroup = Button(0.1, 0.7, "Test mode", "Opens this group in test mode",
+        function() ns.OpenTest({ group }) end, { disabled = function() return ns.TestLocked() end }),
+      duplicate = Button(0.2, 0.7, "Duplicate",
+        "Adds a copy of this group and its displays. The copy sits on top of the original on screen until you move it.",
+        function()
           -- CopyTable copies raw fields only, no metatables; Prepare adds them.
           local copy = CopyTable(group)
           copy.id = ns.NewGroupID()
@@ -2186,38 +2335,40 @@ local function GroupOptions(group, index)
           ns.Prepare(copy)
           table.insert(ns.groups, copy)
           Changed(true)
-          AceConfigDialog:SelectGroup(addonName, "g" .. copy.id)
+          OpenPage(copy)
+        end),
+      -- A confirm function returning a string sets the prompt (AceConfigDialog).
+      delete = Button(0.4, 0.8, "Delete group", nil, function()
+        tDeleteItem(ns.groups, group)
+        Changed(true)
+      end, {
+        confirm = function()
+          local displays = 0
+          for _ in ns.Displays(group) do
+            displays = displays + 1
+          end
+          return DeletePrompt(("Delete %s?"):format(group.name or ("Group " .. group.id)),
+            ("This also deletes its %s. You cannot undo this."):format(Count(displays, "display", "displays")))
         end,
-      },
-      delete = {
-        type = "execute", order = 1.3, width = 0.7, name = "Delete group",
-        -- A confirm function returning a string sets the prompt (AceConfigDialog).
-        confirm = function() return ("Delete %s and its displays?"):format(group.name or ("Group " .. group.id)) end,
-        func = function()
-          tDeleteItem(ns.groups, group)
-          Changed(true)
-        end,
-      },
+      }),
       firstLineWarning = FirstLineWarning(group, 6),
     },
   }
-  -- Export sits between Duplicate and Delete and ends the row; its box
-  -- opens under it.
-  GroupExport(actions.args, group, 1.2, 0.7)
+  -- A toolbar of buttons, as on a display's page; Export sits between
+  -- Duplicate and Delete, and its box opens under the row, above the name.
+  GroupExport(actions.args, group, 0.3)
 
-  -- The Displays tab's own options draw above its tree (FeedGroup feeds a
-  -- group's options before its tree), so these show on the Displays tab only.
+  -- The Displays node's own page: the add buttons. Its children are the
+  -- displays and line breaks.
   local entries = {
     add = {
       type = "execute", order = 0.1, width = 0.85, name = "Add display",
-      desc = "The new display lists matching auras. Set its Shows option to \"Icon when none match\" for a missing-aura icon.",
       func = function() AddDisplay(group) end,
     },
     addBreak = {
       type = "execute", order = 0.2, width = 0.85, name = "Add line break",
       desc = function()
-        return ("Displays you add after it start a new %s. Move it up or down to split %s elsewhere.")
-            :format(RowWord(group), RowWord(group, true))
+        return ("Adds a line break. Displays below it start a new %s."):format(RowWord(group))
       end,
       func = function() AddLineBreak(group) end,
     },
@@ -2227,7 +2378,7 @@ local function GroupOptions(group, index)
       hidden = function() return #group.displays > 0 end,
     },
   }
-  DisplayImport(entries, group, 0.2, 0.85)
+  DisplayImport(entries, group, 0.3, 0.85)
   for number, display, i in ns.Displays(group) do
     entries["d" .. i] = DisplayOptions(group, display, i, number)
   end
@@ -2237,27 +2388,51 @@ local function GroupOptions(group, index)
     end
   end
 
+  local lines, anchor = LayoutBoxes(group)
+  lines.order, anchor.order = 2, 3
   local args = {
     actions = actions,
-    displays = { type = "group", order = 1, name = "Displays", childGroups = "tree", args = entries },
-    placement = LayoutTab(group),
+    lines = lines,
+    anchor = anchor,
     -- What every display uses unless it sets its own.
     shared = {
-      type = "group", order = 3, name = "Shared settings", childGroups = "tab",
+      type = "group", order = 1, name = SECTION:format("Shared display settings"), childGroups = "tab",
       args = { look = look, text = text, load = load },
     },
+    displays = { type = "group", order = 2, name = SECTION:format("Displays"), childGroups = "tree", args = entries },
   }
 
-  -- An alert icon in the tree while FirstLineWarning shows, so it's seen from
-  -- other pages too; hovering the entry shows its desc.
+  -- In the tree: the display count; gray when nothing in it loads here; an
+  -- alert icon while FirstLineWarning shows, so it's seen from other pages
+  -- too. Hovering the entry shows why (its desc).
+  -- The count reads (loaded/total) while some displays don't load.
   local function TreeName()
+    local count, loaded = 0, 0
+    for _, display in ns.Displays(group) do
+      count = count + 1
+      loaded = loaded + (NotLoadedText(display) and 0 or 1)
+    end
+    local tally = loaded < count and ("(%d/%d)"):format(loaded, count) or ("(%d)"):format(count)
     local name = group.name or ("Group " .. group.id)
+    if GroupNotLoadedText(group) then
+      name = GRAY:format(name .. " " .. tally)
+    else
+      name = ("%s %s"):format(name, GRAY:format(tally))
+    end
     return ns.FirstLineConflict(group) and ALERT .. " " .. name or name
   end
   local function TreeDesc()
-    return ns.FirstLineConflict(group) and FirstLineTitle(group) .. "." or nil
+    local parts = {}
+    if ns.FirstLineConflict(group) then
+      table.insert(parts, FirstLineTitle(group) .. ".")
+    end
+    local why = GroupNotLoadedText(group)
+    if why then
+      table.insert(parts, why)
+    end
+    return #parts > 0 and table.concat(parts, "\n\n") or nil
   end
-  return { type = "group", order = 10 + index, name = TreeName, desc = TreeDesc, childGroups = "tab", args = args }
+  return { type = "group", order = 10 + index, name = TreeName, desc = TreeDesc, childGroups = "tree", args = args }
 end
 
 -- Root -----------------------------------------------------------------------
@@ -2276,17 +2451,113 @@ local function Status()
   return ""
 end
 
-local function NewGroup()
+local function NewGroup(suite)
   local group = {
     id = ns.NewGroupID(),
     name = UniqueName("New group"),
+    suite = suite,
     anchor = { "CENTER", nil, "CENTER", 0, 0 },
     displays = {},
   }
   ns.Prepare(group)
   table.insert(ns.groups, group)
   Changed(true)
-  AceConfigDialog:SelectGroup(addonName, "g" .. group.id)
+  OpenPage(group)
+end
+
+-- A suite's tree node: its page, then its groups. After the groups in no
+-- suite (GroupOptions orders run from 10).
+local function SuiteOptions(name, index)
+  local groups = SuiteGroups(name)
+  local args = {
+    test = Button(0.1, 0.7, "Test mode", "Opens this bundle in test mode",
+      function() ns.OpenTest(groups) end, { disabled = function() return ns.TestLocked() end }),
+    -- Export and Import (AddTopShare) sit at 0.2 and 0.3.
+    ungroup = Button(0.5, 0.7, "Unbundle", "Takes the groups out of this bundle without deleting them", function()
+      for _, group in ipairs(groups) do
+        group.suite = nil
+      end
+      Refresh()
+    end, { confirm = function() return ("Take every group out of %s?"):format(name) end }),
+    delete = Button(0.6, 0.8, "Delete bundle", nil, function()
+      for _, group in ipairs(groups) do
+        tDeleteItem(ns.groups, group)
+      end
+      Changed(true)
+    end, {
+      confirm = function()
+        local displays = 0
+        for _, group in ipairs(groups) do
+          for _ in ns.Displays(group) do
+            displays = displays + 1
+          end
+        end
+        return DeletePrompt(("Delete %s?"):format(name), ("This also deletes its %s and their %s. You cannot undo this.")
+          :format(Count(#groups, "group", "groups"), Count(displays, "display", "displays")))
+      end,
+    }),
+    name = {
+      type = "input", order = 4.1, width = 1.5, name = "Name",
+      desc = "The bundle's name in this list",
+      validate = function(_, value)
+        value = strtrim(value)
+        if value == "" then
+          return "Give it a name"
+        end
+        return (value == name or not tContains(Suites(), value)) or "Another bundle has that name"
+      end,
+      get = function() return name end,
+      set = function(_, value)
+        for _, group in ipairs(groups) do
+          group.suite = strtrim(value)
+        end
+        Refresh()
+        AceConfigDialog:SelectGroup(addonName, SuiteKey(strtrim(value)))
+      end,
+    },
+    addGroup = {
+      type = "select", order = 4.2, width = 1.5, name = "Add group",
+      desc = "Adds a group to this bundle",
+      values = function()
+        local values = { new = ActionEntry("New group") }
+        for _, group in ipairs(ns.groups) do
+          if group.suite ~= name then
+            values["g" .. group.id] = group.name
+          end
+        end
+        return values
+      end,
+      sorting = function()
+        local keys = {}
+        for _, group in ipairs(SortedGroups()) do
+          if group.suite ~= name then
+            table.insert(keys, "g" .. group.id)
+          end
+        end
+        table.insert(keys, "new")
+        return keys
+      end,
+      get = function() return nil end,
+      set = function(_, key)
+        if key == "new" then
+          NewGroup(name)
+          return
+        end
+        GroupByKey(key).suite = name
+        Refresh()
+      end,
+    },
+    nameRow = Break(4.5),
+  }
+  AddTopShare(args, 0.2, name)
+  for i, group in ipairs(groups) do
+    args["g" .. group.id] = GroupOptions(group, i)
+  end
+  return {
+    type = "group", order = 100000 + index, childGroups = "tree", args = args,
+    -- A bag icon sets suites apart from groups in the tree.
+    name = ("|TInterface\\Icons\\INV_Misc_Bag_08:14|t %s %s"):format(name, GRAY:format(("(%d)"):format(#groups))),
+  }
 end
 
 -- The status line as last drawn, so RefreshStatus redraws only when it changed.
@@ -2302,7 +2573,7 @@ local function Options()
       end,
     },
     statusGap = { type = "description", order = 1.5, name = " ", width = "full", hidden = function() return Status() == "" end },
-    newGroup = { type = "execute", order = 2, name = "New group", func = NewGroup },
+    newGroup = { type = "execute", order = 2, name = "New group", func = function() NewGroup() end },
     testMode = {
       type = "execute", order = 2.5, name = "Test mode",
       desc = "Preview your groups with sample icons. Unavailable in combat and PvP matches.",
@@ -2312,8 +2583,11 @@ local function Options()
     topBreak = Break(3.9),
   }
   AddTopShare(args, 4)
-  for index, group in ipairs(SortedGroups()) do
+  for index, group in ipairs(SuiteGroups(nil)) do
     args["g" .. group.id] = GroupOptions(group, index)
+  end
+  for index, name in ipairs(Suites()) do
+    args[SuiteKey(name)] = SuiteOptions(name, index)
   end
   return {
     type = "group", name = "SlopAuras", childGroups = "tree", args = args,
@@ -2410,11 +2684,8 @@ end
 
 -- AceConfigDialog remembers the selected tab per entry and reads it when it
 -- draws the entry's tabs (status.groups.selected). Setting the same tab on
--- every entry at the same level opens the next display or group on the tab in
--- use. Each level carries on its own: a display's tab set on its group would
--- switch the group away from the Displays tab being shown.
--- `level`: "group" (the group's tabs), "shared" (Shared settings' tabs) or
--- "display".
+-- every entry at the same level opens the next display or Shared display settings on
+-- the tab in use. `level`: "shared" (Shared display settings' tabs) or "display".
 -- A missing display has no Text tab, so AceConfigDialog opens it on its first
 -- tab instead. That fallback isn't carried, so the next display with text
 -- still opens on Text.
@@ -2432,15 +2703,12 @@ local function CarryTab(tab, level, display)
     status.groups.selected = tab
   end
   for _, group in ipairs(ns.groups) do
-    local key = "g" .. group.id
     if level == "display" then
       for _, _, i in ns.Displays(group) do
-        Select({ key, "displays", "d" .. i })
+        Select(GroupPath(group, "displays", "d" .. i))
       end
-    elseif level == "shared" then
-      Select({ key, "shared" })
     else
-      Select({ key })
+      Select(GroupPath(group, "shared"))
     end
   end
 end
@@ -2465,13 +2733,16 @@ end
 -- Sized to what it shows. AceConfigDialog applies the size from its status
 -- table on every redraw, so it's set there (SetDefaultSize), not on the frame.
 -- The window's own chrome (title, status bar) takes about 90px; the rest are
--- rough heights of the intro, a button row, the Groups box and a checkbox.
+-- rough heights of the intro, a button row, a box and a checkbox; a suite's
+-- box also has a button row.
 local TEST_WIDTH, MAX_HEIGHT = 450, 640
 
 local function SizeTestWindow()
   local height = 90 + 30
   if not testCollapsed then
-    height = math.min(height + 50 + 40 + 26 * #ns.groups, MAX_HEIGHT)
+    local suites = #Suites()
+    local boxes = suites + (#SuiteGroups(nil) > 0 and 1 or 0)
+    height = math.min(height + 50 + 40 * boxes + 30 * suites + 26 * #ns.groups, MAX_HEIGHT)
   end
   AceConfigDialog:SetDefaultSize(TEST_APP, TEST_WIDTH, height)
 end
@@ -2516,16 +2787,39 @@ local function TestOptions()
     },
     buttonsBreak = Break(5.5),
   }
-  local groups = {}
-  for i, group in ipairs(SortedGroups()) do
-    groups["g" .. group.id] = {
-      type = "toggle", order = i, width = "full", name = group.name or ("Group " .. group.id),
-      desc = "Shows this group with sample icons while test mode is open.",
-      get = function() return ns.IsTested(group) end,
-      set = function(_, value) ns.SetTested(group, value) end,
-    }
+  -- A box of checkboxes for `list`; a suite's box starts with its own
+  -- Select all and Deselect all.
+  local function GroupsBox(order, name, list, suite)
+    local box = {}
+    for i, group in ipairs(list) do
+      box["g" .. group.id] = {
+        type = "toggle", order = i, width = "full", name = group.name or ("Group " .. group.id),
+        desc = "Shows this group with sample icons while test mode is open.",
+        get = function() return ns.IsTested(group) end,
+        set = function(_, value) ns.SetTested(group, value) end,
+      }
+    end
+    if suite then
+      local function SetAll(on)
+        return function()
+          for _, group in ipairs(list) do
+            ns.SetTested(group, on)
+          end
+        end
+      end
+      box.selectAll = { type = "execute", order = 0, width = 0.8, name = "Select all", func = SetAll(true) }
+      box.deselectAll = { type = "execute", order = 0.1, width = 0.8, name = "Deselect all", func = SetAll(false) }
+      box.buttonsBreak = Break(0.5)
+    end
+    return { type = "group", inline = true, order = order, name = name, hidden = Collapsed, args = box }
   end
-  args.groups = { type = "group", inline = true, order = 6, name = "Groups", hidden = Collapsed, args = groups }
+  local loose = SuiteGroups(nil)
+  if #loose > 0 then
+    args.groups = GroupsBox(6, "Groups", loose)
+  end
+  for i, name in ipairs(Suites()) do
+    args["suite" .. i] = GroupsBox(6 + i, name, SuiteGroups(name), true)
+  end
   return { type = "group", name = "Test mode", args = args, disabled = function() return ns.TestLocked() end }
 end
 
@@ -2536,15 +2830,15 @@ local function OnTestHide(frame)
   end
 end
 
--- `only`: a group to test on its own (its "Test group" button); otherwise the
--- ticks from last time, or every group the first time.
+-- `only`: the groups to test on their own (Test group, Test suite);
+-- otherwise the ticks from last time, or every group the first time.
 function ns.OpenTest(only)
   if ns.TestLocked() then
     return
   end
   if only or not testOpened then
     for _, group in ipairs(ns.groups) do
-      ns.SetTested(group, not only or group == only)
+      ns.SetTested(group, not only or tContains(only, group))
     end
   end
   testOpened = true
@@ -2565,35 +2859,67 @@ function ns.OnTestEnded()
   end
 end
 
+-- A click on a tree entry also opens its children. AceConfigDialog doesn't use
+-- the tree's OnClick callback, and AceGUI clears callbacks when the widget goes
+-- back to its pool. The entry is marked open in the tree's status table, as
+-- TreeGroup's SelectByPath does for parents. A newly selected entry redraws
+-- the tree anyway (Button_OnClick); an already selected one needs RefreshTree.
+local function OnTreeClick(tree, _, value, wasSelected)
+  local open = (tree.status or tree.localstatus).groups
+  if not open[value] then
+    open[value] = true
+    if wasSelected then
+      tree:RefreshTree()
+    end
+  end
+end
+
+local function HookTree(container)
+  for _, child in ipairs(container.children or {}) do
+    if child.type == "TreeGroup" then
+      child:SetCallback("OnClick", OnTreeClick)
+    end
+  end
+end
+
 function ns.InitOptions()
   LibStub("AceConfig-3.0"):RegisterOptionsTable(addonName, Options)
   LibStub("AceConfig-3.0"):RegisterOptionsTable(TEST_APP, TestOptions)
   -- Only in its own window (/slop), not the game's Options -> AddOns: that
-  -- panel is too narrow for two trees beside the settings.
-  -- Wide enough for two trees (groups, and a group's displays) beside rows of
-  -- three 170px controls.
-  AceConfigDialog:SetDefaultSize(addonName, 1080, 640)
+  -- panel is too narrow for the tree beside the settings.
+  -- Wide enough for the tree beside rows of three 170px controls, and tall
+  -- enough for a group page with its Rows and Anchor boxes.
+  AceConfigDialog:SetDefaultSize(addonName, 1080, 700)
+  -- Wider than AceGUI's default tree (175), for suites, groups and displays
+  -- three levels deep. Still resizable by dragging its edge.
+  local status = AceConfigDialog:GetStatusTable(addonName)
+  status.groups = status.groups or {}
+  status.groups.treewidth = status.groups.treewidth or 260
   hooksecurefunc(AceConfigDialog, "FeedGroup", function(_, appName, _, container, _, path)
     if appName ~= addonName then
       return
     end
     HookWidgets(container)
-    -- A tab's page: { group, tab }, { group, "shared", tab } or
-    -- { group, "displays", display, tab }.
-    if path and type(path[1]) == "string" and path[1]:match("^g%d+$") then
-      if #path == 2 then
-        CarryTab(path[2], "group")
-      elseif #path == 3 and path[2] == "shared" then
-        CarryTab(path[3], "shared")
-      elseif #path == 4 then
-        local index = tonumber(path[3]:match("^d(%d+)$"))
-        local display
-        for _, group in ipairs(ns.groups) do
-          if "g" .. group.id == path[1] then
-            display = index and group.displays[index]
-          end
-        end
-        CarryTab(path[4], "display", display)
+    if path and #path == 0 then
+      HookTree(container)
+    end
+    -- A tab's page: { [suite,] group, "shared", tab } or
+    -- { [suite,] group, "displays", display, tab }.
+    if not path or type(path[1]) ~= "string" then
+      return
+    end
+    local first = path[1]:find("^s:") and 2 or 1
+    local group = GroupByKey(path[first])
+    local key = path[first + 1]
+    if not group then
+      return
+    elseif key == "shared" and #path == first + 2 then
+      CarryTab(path[first + 2], "shared")
+    elseif key == "displays" and #path == first + 3 then
+      local index = tonumber(path[first + 2]:match("^d(%d+)$"))
+      local display = index and group.displays[index]
+      if display then
+        CarryTab(path[first + 3], "display", display)
       end
     end
   end)

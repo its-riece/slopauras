@@ -349,6 +349,15 @@ local GROUP_ONLY = {
       return value
     end
   end,
+  -- The bundle the group sits in (config strings only).
+  suite = function()
+    return function(value, path)
+      if type(value) ~= "string" or strtrim(value) == "" then
+        Fail(path, "should be a bundle name")
+      end
+      return strtrim(value)
+    end
+  end,
   target = function() return ListOf(ns.TARGETS) end,
   anchorTo = function() return OneOf(Set("unit", "screen", "frame")) end,
   anchor = function() return Anchor end,
@@ -510,7 +519,10 @@ local function ExportDisplay(display, withGroup)
   return result
 end
 
-local function ExportGroup(group)
+-- `withSuite`: keep the group's bundle (config strings, so a full config or a
+-- bundle imports with its bundles). A single group's string leaves it out: the
+-- importer picks where it goes.
+local function ExportGroup(group, withSuite)
   local result = {}
   for key, value in pairs(group) do
     if key == "displays" then
@@ -518,7 +530,7 @@ local function ExportGroup(group)
       for i, display in ipairs(value) do
         result.displays[i] = ExportDisplay(display, false)
       end
-    elseif key ~= "id" then
+    elseif key ~= "id" and (key ~= "suite" or withSuite) then
       result[key] = SharedValue(key, value)
     end
   end
@@ -529,10 +541,11 @@ local function Encode(kind, value)
   return ("SlopAuras:%d:%s:%s"):format(VERSION, kind, C_EncodingUtil.SerializeJSON(value))
 end
 
-function Share.ExportConfig()
+-- `list`: the groups to export (one suite's); all of them without it.
+function Share.ExportConfig(list)
   local groups = {}
-  for i, group in ipairs(ns.groups) do
-    groups[i] = ExportGroup(group)
+  for i, group in ipairs(list or ns.groups) do
+    groups[i] = ExportGroup(group, true)
   end
   return Encode("config", { groups = groups })
 end

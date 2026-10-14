@@ -98,6 +98,9 @@ before relying on it.
 
 - **Group:** placement (`target`, `anchorTo`, `anchor`, `growth`, `lines`, `lineSpacing`,
   `firstLine`) and an ordered `displays` list. Any display key on a group is a default.
+- **Suite** (the editor says **bundle**): a name on groups (`suite`), for the editor only:
+  it groups them in the tree and lets them be tested and exported together. No table, no
+  settings, no inheritance.
 - **Line break:** a `{ mode = "break" }` entry in `displays`; the displays after it start a
   new line. One before the first display, after the last or right after another is
   ignored. Loops that want displays only use `ns.Displays(group)`, which skips breaks and
@@ -269,23 +272,28 @@ below.
 ## The editor (Options.lua)
 
 - `/slop` toggles AceConfigDialog's standalone window, the editor's only home: it isn't in
-  the game's Options → AddOns, which is too narrow for its two trees. `Refresh`
+  the game's Options → AddOns, which is too narrow for its tree. `Refresh`
   (`NotifyChange`) redraws it.
 - Options.lua rebuilds its AceConfig options table from `ns.groups` on every redraw.
   Per-page UI state (open import boxes, pickers) lives in upvalues keyed by page.
-- Tree: groups only, in name order (`SortedGroups`; their order in `ns.groups` does
-  nothing outside the editor). The pages are laid out in "Walking a player through the
-  editor" below. A node's child groups go either in the tree or in tabs (`childGroups`),
-  never both; AceConfigDialog draws a new tree for a tree group under a tab, which is how
-  the Displays tab gets its own tree (`GroupOptions`; a tab's own options draw above its
-  tree). Tree entries are keyed by list position (`d<i>` displays, `b<i>` line breaks), so a
-  display's path is `{ "g<id>", "displays", "d<i>" }`.
+- One tree: groups in no suite first, then suites (`SuiteOptions`, keyed `s:<name>`) with
+  their groups, each in name order (`SortedGroups`, `SuiteGroups`; order in `ns.groups`
+  does nothing outside the editor). Under a group: Shared display settings and Displays; under
+  Displays, the displays and line breaks, keyed by list position (`d<i>`, `b<i>`). A
+  display's path is `{ [ "s:<name>", ] "g<id>", "displays", "d<i>" }`; build paths with `GroupPath` and open pages with
+  `OpenPage`. A node's child groups go either in the tree or in tabs (`childGroups`), never
+  both, so the group page has no tabs: its own options and inline boxes (Rows, Anchor:
+  `LayoutBoxes`) draw on it, and Shared display settings and each display carry the tabs. The
+  pages are laid out in "Walking a player through the editor" below.
+- Gray in the tree means not built on this character (`ns.NotBuiltReason`: Never load,
+  class, "Only if you know spell"); the entry's `desc` says why (`NotLoadedText`,
+  `GroupNotLoadedText`). A group is gray when none of its displays build or its own class
+  rules it out. Show/hide conditions don't count.
 - Right-click on a control clears a display's own value (`HookWidgets`, `Resettable`).
 - `SharedTabs` builds the three tabs a group and a display share: Appearance, Text and Load
   conditions. Appearance is built flat, then grouped into sections (Arrangement, Icon,
   Border, Glow) by `Section` at its end: a new Appearance control needs a row there too, or
-  it won't show. Text holds one `TextBox` each for the timer and stacks. A group's Layout
-  tab (`LayoutTab`) holds the Rows/Columns section (`LineControls`) and Anchor.
+  it won't show. Text holds one `TextBox` each for the timer and stacks.
 - AceConfigDialog lays controls out left to right and wraps; numeric widths are multiples
   of 170px; a tab group fills to the panel bottom (nothing can sit below it); a description
   has one font size.
@@ -297,13 +305,24 @@ Use the labels exactly as below; they are what the player sees. The editor says 
 **column** for a group that grows up or down, where the code says line. `/slop` opens it.
 
 - **Top of the window:** New group, Test mode; Export full config, Import full config,
-  Import a group. The tree on the left lists groups by name.
-- **A group's page**, above its tabs: Name; Units (a dropdown of checkboxes: You, Your
-  target, Your focus, Party members, Party pets, Raid members, Raid pets, Nameplates); Test
-  group, Duplicate, Export, Delete group. Tabs: Displays, Layout, Shared settings.
-- **Displays tab:** Add display, Add line break, Import display, then a second tree: the
-  group's displays, numbered, and its line breaks (a gray rule). A line break's page has
-  Move up, Move down and Delete.
+  Import a group. The tree on the left lists groups (with their number of displays, as
+  loaded/total while some don't load), then
+  bundles (a bag icon before the name) with their groups. Clicking an entry also opens its
+  children (`HookTree` sets the tree's `OnClick` callback, which AceConfigDialog leaves
+  unused); its +/- closes it. Under a group:
+  Shared display settings and Displays. Under Displays: the displays, numbered, and line breaks
+  (a gray rule). Gray
+  entries don't load on this character; hovering one says why.
+- **A bundle's page:** buttons Test mode (this bundle's groups), Export, Import (a bundle,
+  a full config or one group; it goes into the bundle), Unbundle, Delete bundle (with its
+  groups); then Name and Add group (a group not in the bundle, or New group).
+- **A group's page:** buttons Add display, Test mode (this group only), Duplicate, Export,
+  Delete group; then Name; Units (a dropdown of checkboxes: You, Your target, Your focus,
+  Party members, Party pets, Raid members, Raid pets, Nameplates); Bundle (None, your
+  bundles, or New bundle, which puts the group in a bundle called "New bundle" and opens
+  its page to rename it). Then the Rows and Anchor boxes (see Layout below).
+- **Displays** (under the group): Add display, Add line break, Import display.
+- **A line break's page:** Move up, Move down and Delete line break.
 - **A display's page**, above its tabs: Move up, Move down, Duplicate, Delete display; Name; Shows
   (Matching auras, or Icon when none match). Tabs:
   - **Filters:** Filter, with Pick filters (checkboxes for each token; click again to
@@ -330,12 +349,12 @@ Use the labels exactly as below; they are what the player sees. The editor says 
     Offline, Out of sight; Power types, checkboxes for Mana, Rage, Energy, Focus).
   - **Import / export:** Move to group (with two or more groups), Export this display
     (with Include the group's values), Import new settings.
-- **Layout tab:** a Rows (or Columns) box: Grow, New rows go, Row spacing, Show only the
+- **Layout** (on the group's page): a Rows (or Columns) box: Grow, New rows go, Row spacing, Show only the
   first row (only for a group with one row per unit: anchored to each unit's own frame, or
   showing just one of You, Your target, Your focus; `ns.SingleRow`). An Anchor box: Anchor to (Each
   unit's own frame, Screen, A named frame), Frame name (named frame only), Group's point,
   To the frame's, X, Y, Layer.
-- **Shared settings tab:** the same Appearance, Text and Load conditions tabs as a
+- **Shared display settings** (under the group in the tree): the same Appearance, Text and Load conditions tabs as a
   display's, holding the group's values. Every display uses them unless it sets its own.
   On a display, an asterisk after a label marks its own value; right-clicking the control
   goes back to the group's.
@@ -343,8 +362,9 @@ Use the labels exactly as below; they are what the player sees. The editor says 
 ## Import / export (Share.lua)
 
 - `SlopAuras:<VERSION>:<kind>:<json>`, kind `config`, `group` or `display`. `VERSION` is the
-  string format version (now `1`), not the addon version. Bump it only for incompatible
-  changes. Where each kind is pasted: `config` in Import full config (then Replace all my
+  string format version (now `1`), not the addon version. Config strings (a full config, a
+  bundle's export) keep each group's `suite`; a single group's string doesn't. Importing on
+  a bundle's page puts everything in that bundle. Bump it only for incompatible changes. Where each kind is pasted: `config` in Import full config (then Replace all my
   groups, Update existing (replaces same-named groups, adds the rest; only when names match), or Add as new groups), `group` in Import a group, `display` in a group's Import
   display (added at the end) or a display's Import new settings (replaces it).
 - Import is strict: every key must be in the spec tables (`SHARED`, `DISPLAY_ONLY`,
@@ -418,7 +438,8 @@ Group only: `id` (saved only, never in strings), `name`, `target` (one or a list
 -2000 to 2000), `growth` (`RIGHT`, `LEFT`, `DOWN`, `UP`, `CENTER`, `CENTER_VERTICAL`),
 `lines` (where new lines go: `UP` or `DOWN` for sideways growth, `LEFT` or `RIGHT` for up or
 down), `lineSpacing`, `firstLine` (`true`: show only the first line that has auras),
-`layer` (1-10, draw order among groups on one frame, `PlaceOrigin`), `displays`.
+`layer` (1-10, draw order among groups on one frame, `PlaceOrigin`), `displays`, `suite` (a
+name, editor only; in config strings, not group strings; not in row fingerprints).
 
 ## Adding a setting
 

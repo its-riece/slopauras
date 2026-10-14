@@ -274,9 +274,22 @@ end
 -- can't show on this character aren't built: Never load, a class that isn't
 -- yours, a spell you don't know. Classes can't change in a session; known
 -- spells can, and WatchKnownSpells rebuilds when they do.
-local function Builds(d)
-  return not d.neverLoad and ClassAllowed(d) and KnowsSpells(d)
+-- NotBuiltReason says why not, for the editor: "never", "class" or "spell".
+function ns.NotBuiltReason(d)
+  if d.neverLoad then
+    return "never"
+  elseif not ClassAllowed(d) then
+    return "class"
+  elseif not KnowsSpells(d) then
+    return "spell"
+  end
 end
+
+local function Builds(d)
+  return ns.NotBuiltReason(d) == nil
+end
+
+ns.ClassAllowed = ClassAllowed
 
 -- Every spell ID a display's "Only if you know spell" names, and whether it
 -- was known when the rows were last computed. `knownKey` lists the known ones;
@@ -424,8 +437,13 @@ end
 
 -- Every setting of the group and its displays, or nil if it can't be
 -- serialized.
+-- `suite` only sorts groups in the editor, so it's left out: moving a group
+-- between suites while auras are secret mustn't rebuild its rows.
 local function GroupJSON(group)
+  local suite = rawget(group, "suite")
+  group.suite = nil
   local ok, json = pcall(C_EncodingUtil.SerializeJSON, group)
+  group.suite = suite
   return ok and json or nil
 end
 
