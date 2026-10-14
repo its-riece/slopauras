@@ -1,10 +1,9 @@
-# 0.5.0
+# 0.6.0
 
 ## New
 
-- Added LibGetFrame which should mean we now play nice with whatever popular frame addon you're using (Grid2, EUI, ...)
-- Sisyphean settings improvements
+- Added bundles. Put groups in 'em to export together or just tidy up a bit
 
-## Fixed
+## Changed
 
-- Sisyphean perf improvements
+- Sisyphean settings improvements (but like a lot this time)
