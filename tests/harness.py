@@ -81,4 +81,3 @@ observations = []
 def observe(name, status, details):
     observations.append(dict(name=name, status=status, details=details))
     print(f"PASS: {name}")
-
