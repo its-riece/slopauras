@@ -1238,8 +1238,8 @@ local function AddSlot(inst, j, d)
   inst.main:AddAuraSlot(key, FilterFor(inst, d), {
     candidateFilters = candidates, sortMethod = sortMethod, sortDirection = sortDirection,
     initializeFrame = function(frame)
-      -- Slot buttons become forbidden after this callback while auras are
-      -- secret. Place them now, before styling creates their child frames.
+      -- Blizzard locks the button right after this callback while auras are
+      -- secret (Blizzard_AuraContainerFrameProviders.lua, CreateFrame).
       frame:SetPoint(inst.g.start, inst.main, inst.g.start)
       frame:SetFrameLevel(level)
       style(frame)
@@ -1250,8 +1250,8 @@ local function AddSlot(inst, j, d)
   last.sortMethod, last.sortDirection = sortMethod, sortDirection
 end
 
--- Outside secrecy, resizing may change the total slot count. Display 1 on top;
--- children keep their offset when a frame's level changes.
+-- After Chain.Resize adds slots. Display 1 on top. Children keep their offset
+-- when a frame's level changes.
 local function LevelSlots(inst)
   local base, count = inst.main:GetFrameLevel() + 1, inst.slots
   for j = 1, count do
