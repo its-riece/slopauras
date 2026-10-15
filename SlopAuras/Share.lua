@@ -511,9 +511,9 @@ local function SharedValue(key, value)
     return value ~= "" and { value } or nil
   end
   if type(value) == "table" then
-    -- Empty load lists have meaning: class/unitPower override inherited
-    -- restrictions, and target selects no units. The importer accepts either
-    -- empty JSON arrays or objects as lists.
+    -- Empty load lists are kept: a display's empty list overrides its group's,
+    -- and an empty target is a group on no units. Import reads an empty JSON
+    -- object as an empty list.
     if next(value) or key == "class" or key == "unitPower" or key == "target" then
       return CopyTable(value)
     end
