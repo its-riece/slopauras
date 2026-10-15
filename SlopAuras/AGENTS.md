@@ -1,11 +1,14 @@
-# Maintaining SlopAuras
+# How SlopAuras works
 
-For anyone changing SlopAuras' code, agent or person, and for anyone helping a player set it
-up: "Walking a player through the editor" and "Import / export" cover that. SlopAuras is an
-aura tracker for
-World of Warcraft: Forever, a Classic-based client (game type `camelot`) with
-Midnight-style secret values. It draws rows of aura icons on any frame. It builds them from
-Blizzard's AuraContainers, so it keeps working while aura data is secret.
+For agents: how SlopAuras works, and the game rules behind it. Helping a player set it up
+starts at "Walking a player through the editor" and "Import / export". Changing its code
+also follows the rules in `AGENTS.md` at the root of the repo, which isn't part of a
+release.
+
+SlopAuras is an aura tracker for World of Warcraft: Forever, a Classic-based client (game
+type `camelot`) with Midnight-style secret values. It draws rows of aura icons on any frame.
+It builds them from Blizzard's AuraContainers, so it keeps working while aura data is
+secret.
 
 Source, issues and changelog: https://github.com/its-riece/slopauras. A downloaded copy may
 be older than the repo.
@@ -17,7 +20,7 @@ Load order is the `.toc` order.
 | File | What it does |
 |---|---|
 | `Libs/` | LibStub, CallbackHandler, AceGUI-3.0, AceConfig-3.0 (editor only), LibSharedMedia-3.0 (fonts, LGPL v2.1), LibGetFrame-1.0 (unit frames, GPL v2; ForeverAuras' MINOR 79, which skips aura containers when scanning). |
-| `Ranks.lua` | Spell rank families (class spells), generated from talentsforever.com data (CC BY 4.0, credited in the file). Regenerate rather than hand-edit. `ns.SpellRanks(id)`. |
+| `Ranks.lua` | Spell rank families (class spells), generated from talentsforever.com data (CC BY 4.0, credited in the file). Generated; don't hand-edit. `ns.SpellRanks(id)`. |
 | `Chain.lua` | Builds a group's lines out of AuraContainers and links them; buttons, borders, glow, missing icons. No saved-data knowledge beyond a display's keys. |
 | `SlopAuras.lua` | Saved settings and inheritance (`DEFAULTS`, `ns.Prepare`), rows and hosts, show/hide conditions, applying editor changes, events. |
 | `Share.lua` | Import/export strings: validation, export, import. |
@@ -452,20 +455,6 @@ Group only: `id` (saved only, never in strings), `name`, `target` (one or a list
 down), `lineSpacing`, `firstLine` (`true`: show only the first line that has auras),
 `layer` (1-10, draw order among groups on one frame, `PlaceOrigin`), `displays`, `suite` (a
 name, editor only; in config strings, not group strings; not in row fingerprints).
-
-## Adding a setting
-
-1. A default in `DEFAULTS` (SlopAuras.lua) if it needs one.
-2. Use it where it acts (`Chain.Configure` / `StyleButton` for looks, `Shows` for
-   conditions). A key `StyleButton` reads also goes in `STYLE_KEYS` (Chain.lua):
-   `Configure` skips buttons whose keys there haven't changed.
-3. A control in Options.lua, wrapped in `Resettable` for right-click. An Appearance
-   control also gets a row in its section (`Section` calls in `SharedTabs`).
-4. A validator in Share.lua's spec tables, plus `SharedValue` if the saved form differs
-   from JSON.
-5. Update "Saved keys" above.
-6. If it changes which containers exist, include it in the row signature and pass
-   `structural = true`.
 
 ## References
 

@@ -1,0 +1,49 @@
+{
+  "runtime.version": "Lua 5.1",
+  "runtime.builtin": {
+    "basic": "disable",
+    "debug": "disable",
+    "io": "disable",
+    "math": "disable",
+    "os": "disable",
+    "package": "disable",
+    "string": "disable",
+    "table": "disable",
+    "utf8": "disable"
+  },
+
+  "workspace.checkThirdParty": false,
+  "workspace.ignoreDir": [
+    "Libs"
+  ],
+
+  "format.defaultConfig": {
+    "indent_style": "space",
+    "indent_size": "2",
+    "end_statement_with_semicolon": "never",
+    "quote_style": "double",
+    "align_array_table": "false",
+    "align_continuous_inline_comment": "false"
+  },
+
+  "diagnostics.neededFileStatus": {
+    "codestyle-check": "Any"
+  },
+  "diagnostics.disable": [
+    "ambiguity-1",
+    "cast-local-type",
+    "deprecated",
+    "duplicate-set-field",
+    "inject-field",
+    "lowercase-global",
+    "missing-fields",
+    "missing-parameter",
+    "missing-return",
+    "need-check-nil",
+    "param-type-mismatch",
+    "redundant-parameter",
+    "unbalanced-assignments",
+    "undefined-field",
+    "undefined-global"
+  ]
+}
