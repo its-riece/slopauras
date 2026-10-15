@@ -373,6 +373,9 @@ Use the labels exactly as below; they are what the player sees. The editor says 
 - Import is strict: every key must be in the spec tables (`SHARED`, `DISPLAY_ONLY`,
   `GROUP_ONLY`), Share.lua checks every value and range, and nothing changes until the
   whole string passes. Parsing uses `C_EncodingUtil`, so nothing pasted runs as code.
+  Counts (`max`, `wrap`, `lineCap`) and `layer` must be whole numbers. Export keeps
+  empty `class`, `unitPower` and `target` lists: a display's empty `unitPower` overrides
+  its group's, and an empty `target` is a group on no units.
 - JSON is the saved table (see "Saved keys") with these differences:
   - A config is `{ "groups": [ ... ] }`. Group names must be unique.
   - No `id`: the importer assigns one. A group needs `name`.

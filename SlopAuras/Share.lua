@@ -47,6 +47,17 @@ local function Number(min, max)
   end
 end
 
+local function Integer(min, max)
+  local check = Number(min, max)
+  return function(value, path)
+    check(value, path)
+    if value % 1 ~= 0 then
+      Fail(path, "should be a whole number")
+    end
+    return value
+  end
+end
+
 local function Boolean(value, path)
   if type(value) ~= "boolean" then
     Fail(path, "should be true or false")
@@ -181,7 +192,7 @@ local SHARED = {
   alpha = function() return Number(0, 1) end,
   zoom = function() return Number(0, 1) end,
   timerSize = function() return Number(6, 32) end,
-  max = function() return Number(1, 40) end,
+  max = function() return Integer(1, 40) end,
   sort = function() return OneOf(Sorts()) end,
   sortReverse = function() return Boolean end,
   desaturate = function() return Boolean end,
@@ -295,8 +306,8 @@ local DISPLAY_ONLY = {
   mode = function() return OneOf(Set("list", "missing")) end,
   filter = function() return Filter end,
   newLine = function() return Boolean end, -- converted, see ns.ConvertNewLine
-  wrap = function() return Number(1, 40) end,
-  lineCap = function() return Number(1, 40) end,
+  wrap = function() return Integer(1, 40) end,
+  lineCap = function() return Integer(1, 40) end,
   spellIDs = function() return SpellIDs end,
   rankSpellIDs = function() return SpellIDs end,
   maxDuration = function() return Number(1, 86400) end,
@@ -364,9 +375,9 @@ local GROUP_ONLY = {
   growth = function() return OneOf(ns.Chain.GROWTHS) end,
   lines = function() return OneOf(Set("UP", "DOWN", "LEFT", "RIGHT")) end,
   lineSpacing = function() return Number(0, 40) end,
-  lineMax = function() return Number(1, 40) end, -- converted, see ns.ConvertLineMax
+  lineMax = function() return Integer(1, 40) end, -- converted, see ns.ConvertLineMax
   firstLine = function() return Boolean end,
-  layer = function() return Number(1, 10) end,
+  layer = function() return Integer(1, 10) end,
   displays = function()
     return function(value, path)
       if not IsList(value) then
@@ -494,12 +505,19 @@ local function SharedValue(key, value)
     return { point = value[1], frame = value[2], relativePoint = value[3], x = value[4], y = value[5] }
   end
   if (key == "class" or key == "target") and type(value) == "string" then
+    if key == "class" and value == "" then
+      return {} -- legacy explicit all-classes override
+    end
     return value ~= "" and { value } or nil
   end
   if type(value) == "table" then
-    -- An empty list would come back as an empty JSON object or array, and
-    -- means the same as no value.
-    return next(value) and CopyTable(value) or nil
+    -- Empty load lists are kept: a display's empty list overrides its group's,
+    -- and an empty target is a group on no units. Import reads an empty JSON
+    -- object as an empty list.
+    if next(value) or key == "class" or key == "unitPower" or key == "target" then
+      return CopyTable(value)
+    end
+    return nil
   end
   return value
 end
