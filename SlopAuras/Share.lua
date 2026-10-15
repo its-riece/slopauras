@@ -255,6 +255,8 @@ local SHARED = {
   class = function() return ListOf(Classes()) end,
   resting = function() return ThreeWay end,
   mounted = function() return ThreeWay end,
+  groupSizeOp = function() return OneOf(Set("any", "atLeast", "atMost", "exactly")) end,
+  groupSize = function() return Integer(1, 40) end,
   neverLoad = function() return Boolean end,
   hideWhenPlayerDead = function() return Boolean end,
   -- Saved as one ID or a list, negative for "must not know"; shared as 588,

@@ -1323,6 +1323,10 @@ local function ReadState(host)
     state.resting = IsResting()
     state.mounted = IsMounted()
     state.playerDead = UnitIsDeadOrGhost("player")
+    -- 0 when solo, which counts as 1. Not in Blizzard_APIDocumentationGenerated,
+    -- so no secret tags; Blizzard's raid container loops on it
+    -- (Blizzard_CompactRaidFrameContainer.lua:469).
+    state.groupSize = math.max(GetNumGroupMembers(), 1)
   end
 end
 
@@ -1386,6 +1390,20 @@ local function Wants(want, actual)
   return want == nil or want == "any" or want == actual
 end
 
+-- groupSizeOp compares the group's size with groupSize; nil or "any" (a
+-- display overriding its group) = any size.
+local function SizeFits(op, size, actual)
+  if op == nil or op == "any" or size == nil then
+    return true
+  end
+  if op == "atLeast" then
+    return actual >= size
+  elseif op == "atMost" then
+    return actual <= size
+  end
+  return actual == size
+end
+
 -- Never load, class and known spells aren't checked here: displays that fail
 -- them aren't built (Builds).
 local function Shows(d)
@@ -1412,6 +1430,10 @@ local function Shows(d)
   end
   if not Wants(d.resting, state.resting) or not Wants(d.mounted, state.mounted)
       or d.hideWhenPlayerDead and state.playerDead then
+    return false
+  end
+  -- Test mode ignores it, so a set made for big raids can be previewed solo.
+  if not testing and not SizeFits(d.groupSizeOp, d.groupSize, state.groupSize) then
     return false
   end
   -- Beyond the visible range, flag tokens and PLAYER match the wrong auras;

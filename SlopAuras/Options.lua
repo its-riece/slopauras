@@ -1099,6 +1099,13 @@ local function SharedTabs(t, isDisplay, extra)
   look.args.sort.hidden = ListOnly
   look.args.sortReverse.hidden = ListOnly
 
+  -- Shown once a comparison is picked.
+  local groupSize = Range("groupSize", 1.07, "Players", 1, 40, 1)
+  groupSize.hidden = function()
+    local op = t.groupSizeOp
+    return op == nil or op == "any"
+  end
+
   -- About you and where you are. Classes and known spells decide whether a
   -- group or display is built at all (structural).
   local you = {
@@ -1132,6 +1139,27 @@ local function SharedTabs(t, isDisplay, extra)
       resting = ThreeWay("resting", 1.01, "Resting state", "Resting", "Not resting"),
       mounted = ThreeWay("mounted", 1.02, "Mounted state", "Mounted", "Not mounted"),
       breakState = Break(1.05),
+      groupSizeOp = Resettable({
+        type = "select", order = 1.06, name = Label("groupSizeOp", "Group size"),
+        desc = Desc("groupSizeOp", "The total number of players in your group. Ignored in test mode."),
+        values = { any = "Any", atLeast = "At least", atMost = "At most", exactly = "Exactly" },
+        sorting = { "any", "atLeast", "atMost", "exactly" },
+        get = function() return t.groupSizeOp or "any" end,
+        set = function(_, value)
+          if value == "any" then
+            -- A display saves "any" so it can override a group's comparison.
+            t.groupSize = nil
+            Set("groupSizeOp", isDisplay and "any" or nil)
+            return
+          end
+          if t.groupSize == nil then
+            t.groupSize = 5
+          end
+          Set("groupSizeOp", value)
+        end,
+      }, "groupSizeOp"),
+      groupSize = groupSize,
+      breakSize = Break(1.08),
       nameplateUnits = {
         type = "select", order = 1.1, name = Label("nameplateUnits", "Which nameplates"),
         desc = Desc("nameplateUnits", "Friendly nameplates only appear outside instances, and only with friendly "

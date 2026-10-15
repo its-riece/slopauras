@@ -94,8 +94,8 @@ before relying on it.
 - **Test mode** flips the same global switch, `C_UnitAuras.SwitchAuraDataProvider` /
   `ResetAuraDataProvider`, so Blizzard's aura frames fill too. It runs while the test window
   (its own AceConfigDialog app, Options.lua) is open and at least one group is ticked
-  (`SyncTesting`); untested groups are hidden (`UpdateHost`) and tested nameplate rows show on
-  any plate (`Shows`). It must never stay on in combat: `UpdateAll` ends it and closes the
+  (`SyncTesting`); untested groups are hidden (`UpdateHost`), tested nameplate rows show on
+  any plate and tested rows ignore group size (`Shows`). It must never stay on in combat: `UpdateAll` ends it and closes the
   window when combat starts (`PLAYER_REGEN_DISABLED` runs it) and on any poll that finds
   combat or secret auras. Placeholders have no dispel type, spell ID or duration, so while
   testing list displays get no candidate filters and missing displays get one nothing passes
@@ -122,7 +122,7 @@ before relying on it.
   (`false` for `tint`, `glow`, `borderColor`, `dispelBorder`, `glowInRange`, `timerFont`,
   `stackFont`; `"always"` for `combat`, `glowCombat`;
   `"never"` for `tooltip`;
-  `"auto"` for `hideWhenNotVisible`; `"any"` for `resting`, `mounted`; `"enemy"` for
+  `"auto"` for `hideWhenNotVisible`; `"any"` for `resting`, `mounted`, `groupSizeOp`; `"enemy"` for
   `nameplateUnits`; `"blizzard"` for `borderStyle`).
 - `SlopAuras.toc` `## SavedVariables: SlopAurasDB` = `{ nextID, groups = { ... } }`, shared by
   all characters; `class` and the load keys decide where groups apply.
@@ -276,8 +276,8 @@ below.
 - WoW can't destroy frames. A rebuilt row's old containers get hidden and disabled, and
   stay in memory until `/reload`. Past `RELOAD_HINT` retired containers, the editor
   suggests a reload.
-- `UpdateAll` polls the **conditions** (combat, resting, mounted, dead, offline, visible,
-  hostility, power type...) every 0.25s, because several have no event. Frames change
+- `UpdateAll` polls the **conditions** (combat, resting, mounted, group size, dead, offline,
+  visible, hostility, power type...) every 0.25s, because several have no event. Frames change
   only when a result changes. Class and known spells aren't polled per display: they
   decide what's built (above).
 
@@ -356,7 +356,8 @@ Use the labels exactly as below; they are what the player sees. The editor says 
     precision below, Precision; Font, Size, Outline; Position, Alignment; X, Y; Color) and
     a Stacks box (the same, without the three format controls).
   - **Load conditions:** a "Your character" box (Classes; Combat state, Resting state,
-    Mounted state; Which nameplates, on nameplate groups only; Only if you know spell;
+    Mounted state; Group size (Any, At least, At most, Exactly) and Players, shown once a
+    comparison is picked; Which nameplates, on nameplate groups only; Only if you know spell;
     Hide while you're dead, Never load) and a "Hide a unit's icons when" box (Dead,
     Offline, Out of sight; Power types, checkboxes for Mana, Rage, Energy, Focus).
   - **Import / export:** Move to group (with two or more groups), Export
@@ -429,7 +430,9 @@ Shared (group or display): `size`, `spacing`, `alpha`, `zoom`,
 (1-3); `glow`, `glowCombat` (`"never"`
 too), `glowInRange`, `combat`, `neverLoad`, `knownSpell` (an ID or list; negative = must not
 know; at least one positive must be known), `hideWhenPlayerDead`, `class`, `nameplateUnits`,
-`resting` and `mounted` (`true` only while, `false` only while not, `"any"`), `hideWhenDead`,
+`resting` and `mounted` (`true` only while, `false` only while not, `"any"`), `groupSizeOp`
+(`"atLeast"`, `"atMost"`, `"exactly"`, `"any"`) and `groupSize` (1-40), compared with
+`GetNumGroupMembers()` (solo counts as 1; ignored without both), `hideWhenDead`,
 `hideWhenOffline`, `hideWhenNotVisible`, `unitPower` (a list of `MANA`, `RAGE`, `ENERGY`,
 `FOCUS`: shows only on units whose current `UnitPowerType` token is listed; a unit with no
 token matches nothing; empty or absent: any; a display's empty list overrides its group's).
