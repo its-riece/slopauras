@@ -958,7 +958,7 @@ local function SharedTabs(t, isDisplay, extra)
         { "blizzard", "clock", "short", "long" },
         "How the timer reads at about an hour, three minutes and ten seconds left.\n"
         .. "Clock: 63:42, 3:07, 10\nShort: 2h, 3m, 10s\nLong: 1h 3m, 3m 7s, 10s\n"
-        .. "Blizzard: the game's own countdown."),
+        .. "Blizzard: 2h, 3m, 10"),
       decimals = decimals,
       precision = precision,
       formatBreak = Break(1.9),

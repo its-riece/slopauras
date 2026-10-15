@@ -60,9 +60,15 @@ before relying on it.
 - **Animations inside buttons** go through `AddAuraShownAnimation`; Blizzard plays them
   when the button shows. A registered texture's alpha, vertex color and tex
   coords become secret aspects; its Shown state does not.
-- **Texts on a button:** the countdown (`GetCountdownFontString`) and the stack count are
-  styled after Masque, so their settings win over the skin (`StyleString`). The count's
-  Text and Shown are Blizzard's (`SetApplicationCount`), so hiding it sets its alpha to 0.
+- **Texts on a button:** the timer and the stack count are font strings on the overlay,
+  drawn at `OVERLAY` 7 so they sit over the borders, and styled after Masque, so their
+  settings win over the skin (`StyleString`). The cooldown's own countdown is off: as a
+  child of the cooldown it would draw under the overlay. The timer is the button's
+  duration text (`SetDurationText`, `StyleTimerFormat`): the engine writes the time left
+  through our formatter (`TimerFormatter`; "blizzard" is a rule set copying the countdown's
+  look) and a flat color curve (`TimerColor`). Its Text, Alpha and VertexColor are
+  Blizzard's, so Hide timer uses Shown. The count's Text and Shown are Blizzard's
+  (`SetApplicationCount`), so hiding it sets its alpha to 0.
   Fonts are fetched from LibSharedMedia by saved name, falling back to the text's own; a
   font registered later restyles everything if a display uses it
   (`LibSharedMedia_Registered`, `UsesFont`).
@@ -413,7 +419,7 @@ Shared (group or display): `size`, `spacing`, `alpha`, `zoom`,
 `max`, `sort`, `sortReverse`, `desaturate`, `hideSwipe`, `tint`, `dispelBorder`,
 `borderColor`, `skin`, `borderStyle`, `borderWidth`, `hideTimer`, `hideStacks`, `tooltip`
 (`"never"`, `"always"`, `"out"`), and per text
-(`timer…` for the countdown, `stack…` for the count): `Size`, `Font` (a LibSharedMedia name,
+(`timer…` for the timer, `stack…` for the count): `Size`, `Font` (a LibSharedMedia name,
 `false` for the text's own), `Outline` (`NONE`, `OUTLINE`, `THICKOUTLINE`), `Color`, `Point`,
 `Align` (`LEFT`, `CENTER`, `RIGHT`), `X`, `Y`; `timerFormat` (`blizzard`, `clock`, `short`,
 `long`), `timerDecimals` (0-60 seconds; absent: the game's own threshold), `timerPrecision`

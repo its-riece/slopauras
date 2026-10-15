@@ -31,7 +31,7 @@ local DEFAULTS = {
   timerAlign = "CENTER",
   timerX = 0,
   timerY = 0,
-  -- "blizzard" (the countdown's own), "clock", "short" or "long"
+  -- "blizzard" (the cooldown countdown's look), "clock", "short" or "long"
   -- (TIMER_FORMATS in Chain.lua). No timerDecimals: the game's threshold.
   timerFormat = "blizzard",
   timerPrecision = 1,

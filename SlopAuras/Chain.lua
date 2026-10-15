@@ -708,7 +708,7 @@ local function StyleText(d)
   return table.concat(values, "|")
 end
 
--- A list button's two texts: the cooldown's countdown ("timer" keys) and the
+-- A list button's two texts: the duration text ("timer" keys) and the
 -- stack count ("stack" keys). Per prefix: Size; Font, a LibSharedMedia name
 -- (false or nil: the text's own font); Outline, "NONE", "OUTLINE" or
 -- "THICKOUTLINE"; Color; Point, where on the icon; Align, which side of the
@@ -734,6 +734,9 @@ local function StyleString(text, anchor, d, prefix, face)
   local point, align = d[prefix .. "Point"], d[prefix .. "Align"]
   local ok = pcall(text.SetFont, text, font, d[prefix .. "Size"], outline == "NONE" and "" or outline)
   ok = pcall(function()
+    -- Over the borders on the same frame; Masque sets the count's layer
+    -- when it skins.
+    text:SetDrawLayer("OVERLAY", 7)
     text:ClearAllPoints()
     text:SetPoint(TextPoint(point, align), anchor, point, d[prefix .. "X"], d[prefix .. "Y"])
     text:SetJustifyH(align)
@@ -751,6 +754,11 @@ local UP, DOWN = Enum.NumericRuleFormatRounding.Up, Enum.NumericRuleFormatRoundi
 local TINY = 0.000001
 local MINUTES = { div = 60, step = 1, rounding = DOWN }
 local TIMER_FORMATS = {
+  blizzard = { -- 2h, 3m, 10: the cooldown countdown's look
+    { threshold = TINY, format = "%d", step = 1, rounding = UP },
+    { threshold = 59 + TINY, format = "%dm", step = 60, rounding = UP, components = { { div = 60 } } },
+    { threshold = 3540 + TINY, format = "%dh", step = 3600, rounding = UP, components = { { div = 3600 } } },
+  },
   clock = { -- 63:42, 3:07, 10
     { threshold = TINY, format = "%d", step = 1, rounding = UP },
     { threshold = 59 + TINY, format = "%d:%02d", step = 1, rounding = UP, components = { MINUTES, { mod = 60 } } },
@@ -798,20 +806,36 @@ local function TimerFormatter(format, below, precision)
   return formatter
 end
 
--- "blizzard", or any format not in TIMER_FORMATS, keeps the countdown's own
--- formatting, where the only extra is its one-decimal threshold; nil
--- timerDecimals puts back the game's.
-local function StyleTimerFormat(part, d)
-  local cooldown = part.cooldown
-  part.decimalsDefault = part.decimalsDefault or cooldown:GetCountdownMillisecondsThreshold()
-  local formatter, decimals = nil, part.decimalsDefault
-  if not TIMER_FORMATS[d.timerFormat] then
-    decimals = d.timerDecimals or decimals
-  else
-    formatter = TimerFormatter(d.timerFormat, d.timerDecimals or 0, d.timerPrecision)
+-- One flat color curve per timer color. A binding keeps the curve it was
+-- given until it gets another, so the color always goes through one.
+local timerColors = {}
+
+local function TimerColor(color)
+  local key = table.concat(color, ",")
+  if not timerColors[key] then
+    local curve = C_CurveUtil.CreateColorCurve()
+    curve:AddPoint(0, CreateColor(unpack(color)))
+    curve:AddPoint(1, CreateColor(unpack(color)))
+    timerColors[key] = curve
   end
-  local ok = pcall(cooldown.SetCountdownFormatter, cooldown, formatter)
-  return pcall(cooldown.SetCountdownMillisecondsThreshold, cooldown, decimals) and ok
+  return timerColors[key]
+end
+
+-- The timer is the button's duration text (SetDurationText,
+-- Blizzard_CustomAuraButton.lua): the engine writes the secret time left into
+-- our font string. Calling it again replaces the formatter and color.
+-- "blizzard", or any format not in TIMER_FORMATS, shows one decimal like the
+-- cooldown countdown, under its threshold when timerDecimals is unset.
+local function StyleTimerFormat(part, d)
+  part.decimalsDefault = part.decimalsDefault or part.cooldown:GetCountdownMillisecondsThreshold()
+  local format, decimals, precision = d.timerFormat, d.timerDecimals or 0, d.timerPrecision
+  if format == "blizzard" or not TIMER_FORMATS[format] then
+    format, decimals, precision = "blizzard", d.timerDecimals or part.decimalsDefault, 1
+  end
+  return pcall(part.button.SetDurationText, part.button, part.timer, {
+    textFormatter = TimerFormatter(format, decimals, precision),
+    textColor = { curve = TimerColor(d.timerColor), property = Enum.DurationTextBindingProperty.RemainingDuration },
+  })
 end
 
 -- Applies the display's look to one button's parts. Out of combat only.
@@ -837,18 +861,15 @@ local function StyleButton(part, d)
     part.cooldown:SetAllPoints()
   end
   StyleIcon(part.icon, d, skin and SkinCrop(skin))
-  -- CooldownFrameTemplate draws the remaining time as text over the swipe.
   -- SetDurationCooldown locks only the cooldown's Cooldown and Shown
-  -- (Blizzard_CustomAuraButton.lua), so the swipe and text are ours. Both
-  -- texts are styled after Masque, which places the count from the skin.
-  ok = pcall(part.cooldown.SetHideCountdownNumbers, part.cooldown, d.hideTimer == true) and ok
+  -- (Blizzard_CustomAuraButton.lua), so the swipe is ours. Both texts are
+  -- styled after Masque, which places the count from the skin. The timer's
+  -- Text, Alpha and VertexColor are Blizzard's (SetDurationText), so hiding
+  -- it goes through Shown.
   ok = pcall(part.cooldown.SetDrawSwipe, part.cooldown, not d.hideSwipe) and ok
   ok = StyleTimerFormat(part, d) and ok
-  local timer = part.cooldown:GetCountdownFontString()
-  if timer then
-    part.timerFace = part.timerFace or timer:GetFont()
-    ok = StyleString(timer, part.button, d, "timer", part.timerFace) and ok
-  end
+  ok = StyleString(part.timer, part.button, d, "timer", part.timerFace) and ok
+  ok = pcall(part.timer.SetShown, part.timer, not d.hideTimer) and ok
   part.stackFace = part.stackFace or part.count:GetFont()
   ok = StyleString(part.count, part.button, d, "stack", part.stackFace) and ok
   -- Shown is Blizzard's, so hiding goes through alpha.
@@ -929,6 +950,12 @@ local function StyledButton(inst, j, parts)
     count:SetPoint("BOTTOMRIGHT", -1, 1)
     button:SetApplicationCount(count)
 
+    -- The cooldown's own countdown would draw under the overlay, so the
+    -- timer is a text of ours on it, in the countdown's font.
+    local countdown = cooldown:GetCountdownFontString()
+    cooldown:SetHideCountdownNumbers(true)
+    local timer = overlay:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+
     -- Masque-style displays only. Registered even while the Masque group is
     -- disabled, so enabling it later skins this button too. Masque draws its
     -- frame art (Normal) on the button, under the cooldown swipe and our
@@ -944,7 +971,8 @@ local function StyledButton(inst, j, parts)
     -- display first uses them: creating every kind for every button made
     -- building slow (each aura group makes ten buttons).
     local part = {
-      button = button, icon = icon, cooldown = cooldown, count = count, overlay = overlay, borders = {},
+      button = button, icon = icon, cooldown = cooldown, count = count, timer = timer, overlay = overlay, borders = {},
+      timerFace = countdown and countdown:GetFont() or timer:GetFont(),
       borderOn = false, plainBorders = {}, plainOn = false, ring = ring, ringOn = false, glowOn = false, inst = inst,
     }
     table.insert(parts, part)
