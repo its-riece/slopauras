@@ -1,10 +1,3 @@
-# Unreleased
-
-## Fixed
-
-- Initialize priority-stack anchors and draw order before aura-secret restrictions
-  apply, preserving icons when rebuilding the stack in combat.
-
 # 0.6.0
 
 ## New
