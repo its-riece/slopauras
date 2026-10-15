@@ -1,9 +1,6 @@
-# 0.6.0
+# 0.6.2
 
-## New
+## Fixed
 
-- Added bundles. Put groups in 'em to export together or just tidy up a bit
-
-## Changed
-
-- Sisyphean settings improvements (but like a lot this time)
+- Fixed a bug that could prevent an icon from showing in some situations (thanks [perplexlol](https://github.com/perplexlol))
+- Fixed a bug where borders overlapped icon text
