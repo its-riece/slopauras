@@ -1232,18 +1232,26 @@ local function AddSlot(inst, j, d)
   local sortMethod = AuraContainerSortMethod[d.sort] or AuraContainerSortMethod.Default
   local sortDirection = d.sortReverse and AuraContainerSortDirection.Reverse or AuraContainerSortDirection.Normal
   local candidates = GroupCandidates(d, false)
+  local style = StyledButton(inst, j, inst.parts[j])
+  local count = math.max(inst.slots, #inst.displays)
+  local level = inst.main:GetFrameLevel() + 1 + (count - j) * SLOT_LEVELS
   inst.main:AddAuraSlot(key, FilterFor(inst, d), {
     candidateFilters = candidates, sortMethod = sortMethod, sortDirection = sortDirection,
-    initializeFrame = StyledButton(inst, j, inst.parts[j]),
+    initializeFrame = function(frame)
+      -- Blizzard locks the button right after this callback while auras are
+      -- secret (Blizzard_AuraContainerFrameProviders.lua, CreateFrame).
+      frame:SetPoint(inst.g.start, inst.main, inst.g.start)
+      frame:SetFrameLevel(level)
+      style(frame)
+    end,
   })
-  local frame = inst.main:GetAuraSlotFrame(key)
-  pcall(frame.SetPoint, frame, inst.g.start, inst.main, inst.g.start)
   local last = Sent(inst, inst.main, j)
   last.candidatesSent, last.candidates = true, candidates
   last.sortMethod, last.sortDirection = sortMethod, sortDirection
 end
 
--- Display 1 on top. Children keep their offset when a frame's level changes.
+-- After Chain.Resize adds slots. Display 1 on top. Children keep their offset
+-- when a frame's level changes.
 local function LevelSlots(inst)
   local base, count = inst.main:GetFrameLevel() + 1, inst.slots
   for j = 1, count do
@@ -1262,7 +1270,6 @@ function Chain.NewStack(parent, unit, displays, g, label, plate, skin)
   for j, d in ipairs(displays) do
     AddSlot(inst, j, d)
   end
-  LevelSlots(inst)
   return inst
 end
 
