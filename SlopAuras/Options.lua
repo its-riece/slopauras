@@ -1587,7 +1587,7 @@ local function AddTopShare(args, order, suite)
       key = "any", button = "Import", desc = "Import a group, a full config or another bundle",
       label = "Paste a bundle, a full config or one group here",
       onText = function(text)
-        if strtrim(text):match("^SlopAuras:%d+:(%a+):") == "group" then
+        if ns.Share.Kind(text) == "group" then
           return ImportGroup(text)
         end
         return ImportConfig(text)

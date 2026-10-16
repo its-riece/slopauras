@@ -1,7 +1,9 @@
 -- Share: settings as text, for import and export.
 --
--- A string is "SlopAuras:<version>:<kind>:<json>", kind being "config" (all
--- groups), "group" or "display". The JSON is the saved table with two changes,
+-- A string is "SlopAuras:<format>:<addon version>:<kind>:<json>", kind being
+-- "config" (all groups), "group" or "display". Format 1 strings have no addon
+-- version. Every format from 2 on starts with it, so a copy can name the
+-- version a string from a newer format came from. The JSON is the saved table with two changes,
 -- because JSON object keys are strings: spell ID sets become lists of IDs, and
 -- a group's anchor becomes named fields. Parsing uses C_EncodingUtil, so
 -- nothing pasted runs as code.
@@ -9,12 +11,13 @@
 -- Import is strict: any unknown key or bad value rejects the whole string and
 -- names the problem. Nothing is changed until a string has passed.
 
-local _, ns = ...
+local addonName, ns = ...
 
 local Share = {}
 ns.Share = Share
 
-local VERSION = 1
+local VERSION = 2
+local ADDON_VERSION = C_AddOns.GetAddOnMetadata(addonName, "Version")
 
 -- Validation ------------------------------------------------------------------
 -- Each check takes the JSON value and its path ("displays[2].size") and
@@ -558,7 +561,7 @@ local function ExportGroup(group, withSuite)
 end
 
 local function Encode(kind, value)
-  return ("SlopAuras:%d:%s:%s"):format(VERSION, kind, C_EncodingUtil.SerializeJSON(value))
+  return ("SlopAuras:%d:%s:%s:%s"):format(VERSION, ADDON_VERSION, kind, C_EncodingUtil.SerializeJSON(value))
 end
 
 -- `list`: the groups to export (one suite's); all of them without it.
@@ -588,6 +591,60 @@ local VALIDATORS = {
   display = ValidateOneDisplay,
 }
 
+-- Returns a string's format, addon version (nil in format 1, or when it's not
+-- a plain version, since it's shown to the player), kind and JSON. Kind and
+-- JSON are nil for a format this copy doesn't know.
+local function Parse(text)
+  local format, rest = strtrim(text or ""):match("^SlopAuras:(%d+):(.*)$")
+  format = tonumber(format)
+  if not format then
+    return nil
+  end
+  local version
+  if format >= 2 then
+    version = rest:match("^([%w%.%-]+):")
+    rest = rest:match("^[^:]*:(.*)$") or ""
+  end
+  if format > VERSION then
+    return format, version
+  end
+  local kind, json = rest:match("^(%a+):(.*)$")
+  return format, version, kind, json
+end
+
+-- Whether dotted version `a` is later than `b`.
+local function IsLater(a, b)
+  local parts = {}
+  for number in b:gmatch("%d+") do
+    parts[#parts + 1] = tonumber(number)
+  end
+  local i = 0
+  for number in a:gmatch("%d+") do
+    i = i + 1
+    local mine = parts[i] or 0
+    if tonumber(number) ~= mine then
+      return tonumber(number) > mine
+    end
+  end
+  return false
+end
+
+-- `message`, plus a suggestion to update when the string is from a later
+-- SlopAuras than this one.
+local function WithVersion(message, version)
+  if not (version and IsLater(version, ADDON_VERSION)) then
+    return message
+  end
+  local hint = "%s. This import is from SlopAuras %s and you have %s. Updating may fix it."
+  return hint:format(message, version, ADDON_VERSION)
+end
+
+-- The kind of SlopAuras text `text` is ("config", "group", "display"), or nil.
+function Share.Kind(text)
+  local _, _, kind = Parse(text)
+  return kind
+end
+
 -- Returns the saved form of `text` if it holds `kind`, or nil and a message.
 -- config: a list of groups; group: a group; display: a display.
 function Share.Import(text, kind)
@@ -595,27 +652,34 @@ function Share.Import(text, kind)
   if text == "" then
     return nil, "Nothing pasted"
   end
-  local version, found, json = text:match("^SlopAuras:(%d+):(%a+):(.*)$")
-  if not version then
-    return nil, "That isn't SlopAuras text. It should start with \"SlopAuras:\"."
+  local format, version, found, json = Parse(text)
+  if format and format > VERSION then
+    if version then
+      local newer = "This import is from SlopAuras %s and you have %s. Update SlopAuras to import it."
+      return nil, newer:format(version, ADDON_VERSION)
+    end
+    return nil, "This import is from a newer version of SlopAuras. Update SlopAuras to import it."
   end
-  if tonumber(version) ~= VERSION then
-    return nil, ("That text is from a different version of SlopAuras (format %s)"):format(version)
+  if not found then
+    return nil, "This isn't a SlopAuras import. It should start with \"SlopAuras:\"."
+  end
+  if format < 1 then
+    return nil, ("This import is from a different version of SlopAuras (format %s)"):format(format)
   end
   if not VALIDATORS[found] then
-    return nil, ("Unknown kind of text: %q"):format(found)
+    return nil, WithVersion(("Unknown kind of import: %q"):format(found), version)
   end
   if found ~= kind then
-    return nil, ("That text holds %s, not %s"):format(KIND_NAMES[found], KIND_NAMES[kind])
+    return nil, ("This import holds %s, not %s"):format(KIND_NAMES[found], KIND_NAMES[kind])
   end
   local parsed, value = pcall(C_EncodingUtil.DeserializeJSON, json)
   if not parsed or value == nil then
-    return nil, "The text after the prefix isn't valid JSON"
+    return nil, "The part after the prefix isn't valid JSON"
   end
   local ok, result = pcall(VALIDATORS[kind], value)
   if not ok then
     if type(result) == "table" and result.problem then
-      return nil, "Not imported. " .. result.problem
+      return nil, "Not imported. " .. WithVersion(result.problem, version)
     end
     error(result, 0)
   end

@@ -374,10 +374,17 @@ Use the labels exactly as below; they are what the player sees. The editor says 
 
 ## Import / export (Share.lua)
 
-- `SlopAuras:<VERSION>:<kind>:<json>`, kind `config`, `group` or `display`. `VERSION` is the
-  string format version (now `1`), not the addon version. Config strings (a full config, a
+- `SlopAuras:<VERSION>:<addon version>:<kind>:<json>`, kind `config`, `group` or `display`.
+  `VERSION` is the string format version (now `2`); the addon version is the `.toc`
+  `## Version` of the copy that exported it. Format `1` strings
+  (`SlopAuras:1:<kind>:<json>`) have no addon version and still import. Every format from
+  `2` on must keep the addon version right after `VERSION`, so older copies can name it
+  when they can't read the rest. When a string fails validation and its addon version is
+  later than this copy's, the error names both versions and suggests updating; a string
+  from a later format is refused with the same suggestion. Config strings (a full config, a
   bundle's export) keep each group's `suite`; a single group's string doesn't. Importing on
-  a bundle's page puts everything in that bundle. Bump it only for incompatible changes. Where each kind is pasted: `config` in Import full config (then Replace all my
+  a bundle's page puts everything in that bundle. Bump `VERSION` only for incompatible
+  changes; a new key doesn't need one. Where each kind is pasted: `config` in Import full config (then Replace all my
   groups, Update existing (replaces same-named groups, adds the rest; only when names match), or Add as new groups), `group` in Import a group, `display` in a group's Import
   display (added at the end) or a display's Import new settings (replaces it).
 - Import is strict: every key must be in the spec tables (`SHARED`, `DISPLAY_ONLY`,
