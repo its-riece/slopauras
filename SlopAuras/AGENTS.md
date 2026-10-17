@@ -94,8 +94,8 @@ before relying on it.
 - **Test mode** flips the same global switch, `C_UnitAuras.SwitchAuraDataProvider` /
   `ResetAuraDataProvider`, so Blizzard's aura frames fill too. It runs while the test window
   (its own AceConfigDialog app, Options.lua) is open and at least one group is ticked
-  (`SyncTesting`); untested groups are hidden (`UpdateHost`), tested nameplate rows show on
-  any plate and tested rows ignore group size (`Shows`). It must never stay on in combat: `UpdateAll` ends it and closes the
+  (`SyncTesting`); untested groups are hidden (`UpdateHost`), and tested rows ignore friend
+  or enemy and group size (`Shows`). It must never stay on in combat: `UpdateAll` ends it and closes the
   window when combat starts (`PLAYER_REGEN_DISABLED` runs it) and on any poll that finds
   combat or secret auras. Placeholders have no dispel type, spell ID or duration, so while
   testing list displays get no candidate filters and missing displays get one nothing passes
@@ -122,8 +122,8 @@ before relying on it.
   (`false` for `tint`, `glow`, `borderColor`, `dispelBorder`, `glowInRange`, `timerFont`,
   `stackFont`; `"always"` for `combat`, `glowCombat`;
   `"never"` for `tooltip`;
-  `"auto"` for `hideWhenNotVisible`; `"any"` for `resting`, `mounted`, `groupSizeOp`; `"enemy"` for
-  `nameplateUnits`; `"blizzard"` for `borderStyle`).
+  `"auto"` for `hideWhenNotVisible`; `"any"` for `resting`, `mounted`, `groupSizeOp`,
+  `reaction`; `"blizzard"` for `borderStyle`).
 - `SlopAuras.toc` `## SavedVariables: SlopAurasDB` = `{ nextID, groups = { ... } }`, shared by
   all characters; `class` and the load keys decide where groups apply.
 
@@ -358,9 +358,10 @@ Use the labels exactly as below; they are what the player sees. The editor says 
     a Stacks box (the same, without the three format controls).
   - **Load conditions:** a "Your character" box (Classes; Combat state, Resting state,
     Mounted state; Group size (Any, At least, At most, Exactly) and Players, shown once a
-    comparison is picked; Which nameplates, on nameplate groups only; Only if you know spell;
-    Hide while you're dead, Never load) and a "Hide a unit's icons when" box (Dead,
-    Offline, Out of sight; Power types, checkboxes for Mana, Rage, Energy, Focus).
+    comparison is picked; Only if you know spell; Hide while you're dead, Never load) and
+    a "Show on units that are" box (Alive, Online; Friend or enemy (Either, Enemies,
+    Friends), In sight (Automatic, Yes, Either); Power types, checkboxes for Mana, Rage,
+    Energy, Focus).
   - **Import / export:** Move to group (with two or more groups), Export
     (with Include the group's values), Import new settings.
 - **Layout** (on the group's page): a Rows (or Columns) box: Grow, New rows go, Row spacing, Show only the
@@ -437,7 +438,9 @@ Shared (group or display): `size`, `spacing`, `alpha`, `zoom`,
 `long`), `timerDecimals` (0-60 seconds; absent: the game's own threshold), `timerPrecision`
 (1-3); `glow`, `glowCombat` (`"never"`
 too), `glowInRange`, `combat`, `neverLoad`, `knownSpell` (an ID or list; negative = must not
-know; at least one positive must be known), `hideWhenPlayerDead`, `class`, `nameplateUnits`,
+know; at least one positive must be known), `hideWhenPlayerDead`, `class`, `reaction`
+(`"enemy"`, `"friendly"`, `"any"`: `UnitIsFriend("player", unit)`, so neutral creatures are
+enemies; absent: enemies on nameplates, any unit elsewhere),
 `resting` and `mounted` (`true` only while, `false` only while not, `"any"`), `groupSizeOp`
 (`"atLeast"`, `"atMost"`, `"exactly"`, `"any"`) and `groupSize` (1-40), compared with
 `GetNumGroupMembers()` (solo counts as 1; ignored without both), `hideWhenDead`,
@@ -457,6 +460,8 @@ On load, `LoadSettings` drops displays with any other `mode` and the retired key
 export strings that import accepts. A group's `lineMax` (older saves and strings) is
 converted on load and import by `ns.ConvertLineMax`, and a display's `newLine` becomes a
 line break before it (`ns.ConvertNewLine`; a single display's string just drops it).
+`nameplateUnits` (`"enemy"`, `"friendly"`, `"all"`, nameplates only) becomes `reaction` on
+load and import (`ns.ConvertNameplateUnits`, `ns.ConvertReaction`; `"all"` becomes `"any"`).
 
 Group only: `id` (saved only, never in strings), `name`, `target` (one or a list of `player`,
 `target`, `focus`, `party`, `partypet`, `raid`, `raidpet`, `nameplate`), `anchorTo` (`unit`,

@@ -1160,19 +1160,6 @@ local function SharedTabs(t, isDisplay, extra)
       }, "groupSizeOp"),
       groupSize = groupSize,
       breakSize = Break(1.08),
-      nameplateUnits = {
-        type = "select", order = 1.1, name = Label("nameplateUnits", "Which nameplates"),
-        desc = Desc("nameplateUnits", "Friendly nameplates only appear outside instances, and only with friendly "
-          .. "nameplates turned on in the game's options"),
-        values = { enemy = "Enemies", friendly = "Friendly", all = "Both" },
-        hidden = function()
-          local target = t.target
-          return not (target == "nameplate" or type(target) == "table" and tContains(target, "nameplate"))
-        end,
-        get = function() return t.nameplateUnits end,
-        -- A display saves "enemy" so it can override a group's other choice.
-        set = function(_, value) Set("nameplateUnits", (value ~= "enemy" or isDisplay) and value or nil) end,
-      },
       knownSpell = {
         type = "input", order = 1.92, name = Label("knownSpell", "Only if you know spell"),
         desc = Desc("knownSpell", "Separate IDs with commas. Shows once you know any of them, e.g. 588 for "
@@ -1193,7 +1180,6 @@ local function SharedTabs(t, isDisplay, extra)
           Set("knownSpell", #ids > 1 and ids or ids[1])
         end,
       },
-      break0 = Break(1.9),
       knownSpellName = {
         type = "description", order = 1.95, width = "full",
         name = function()
@@ -1214,16 +1200,31 @@ local function SharedTabs(t, isDisplay, extra)
 
   -- About each unit the display is on.
   local unit = {
-    type = "group", inline = true, order = 2, name = "Hide a unit's icons when",
+    type = "group", inline = true, order = 2, name = "Show on units that are",
     args = {
-      hideWhenDead = Toggle("hideWhenDead", 1, "Dead", "Hides a unit's icons while that unit is dead"),
-      hideWhenOffline = Toggle("hideWhenOffline", 2, "Offline", "Hides a unit's icons while that player is offline"),
+      hideWhenDead = Toggle("hideWhenDead", 1, "Alive", "Ghosts count as dead"),
+      hideWhenOffline = Toggle("hideWhenOffline", 2, "Online"),
       break0 = Break(2.9),
+      reaction = Resettable({
+        type = "select", order = 3, name = Label("reaction", "Friend or enemy"),
+        desc = Desc("reaction", "Enemies include neutral creatures and unflagged players of the other faction. "
+          .. "Friendly nameplates only appear outside instances, and only if you turn them on in the game's options."),
+        values = { any = "Either", enemy = "Enemies", friendly = "Friends" },
+        sorting = { "any", "enemy", "friendly" },
+        -- Unset means enemies on nameplate groups, either elsewhere.
+        get = function() return t.reaction or ns.ReactionDefault(t.target) end,
+        -- A display saves its choice so it can override the group's.
+        set = function(_, value)
+          Set("reaction", (isDisplay or value ~= ns.ReactionDefault(t.target)) and value or nil)
+        end,
+      }, "reaction"),
       hideWhenNotVisible = {
-        type = "select", order = 3, name = Label("hideWhenNotVisible", "Out of sight"),
-        desc = Desc("hideWhenNotVisible", "When a unit is too far away for the game to show, filters match the wrong auras. "
-          .. "Spell ID matches stay correct. Automatic hides filter displays and keeps spell ID ones."),
-        values = { auto = "Automatic", yes = "Hide", no = "Keep showing" },
+        type = "select", order = 3.1, name = Label("hideWhenNotVisible", "In sight"),
+        desc = Desc("hideWhenNotVisible", "Beyond the range the game draws units at, filters match the wrong auras. "
+          .. "Spell IDs still match the right ones. Automatic shows filter displays only in sight and spell ID "
+          .. "displays at any range."),
+        values = { auto = "Automatic", yes = "Yes", no = "Either" },
+        sorting = { "auto", "yes", "no" },
         get = function()
           local value = t.hideWhenNotVisible
           return (value == nil or value == "auto") and "auto" or value and "yes" or "no"
@@ -1289,7 +1290,6 @@ local function SharedTabs(t, isDisplay, extra)
   Resettable(look.args.glowMode, "glow")
   Resettable(look.args.glow, "glow")
   Resettable(you.args.combat, "combat")
-  Resettable(you.args.nameplateUnits, "nameplateUnits")
   Resettable(you.args.knownSpell, "knownSpell")
   Resettable(unit.args.hideWhenNotVisible, "hideWhenNotVisible")
 

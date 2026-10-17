@@ -254,7 +254,8 @@ local SHARED = {
   glowCombat = function() return OneOf(Set("always", "in", "out", "never")) end,
   glowInRange = function() return Boolean end,
   combat = function() return OneOf(COMBAT) end,
-  nameplateUnits = function() return OneOf(Set("enemy", "friendly", "all")) end,
+  reaction = function() return OneOf(Set("enemy", "friendly", "any")) end,
+  nameplateUnits = function() return OneOf(Set("enemy", "friendly", "all")) end, -- converted, see ns.ConvertNameplateUnits
   class = function() return ListOf(Classes()) end,
   resting = function() return ThreeWay end,
   mounted = function() return ThreeWay end,
@@ -441,6 +442,7 @@ local function ValidateGroup(value, path)
   group.displays = group.displays or {}
   ns.ConvertLineMax(group)
   ns.ConvertNewLine(group)
+  ns.ConvertNameplateUnits(group)
   return group
 end
 
@@ -449,6 +451,7 @@ end
 local function ValidateOneDisplay(value)
   local display = ValidateDisplay(value, "display")
   display.newLine = nil
+  ns.ConvertReaction(display)
   return display
 end
 

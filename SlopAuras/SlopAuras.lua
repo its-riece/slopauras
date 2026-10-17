@@ -51,7 +51,6 @@ local DEFAULTS = {
   lineSpacing = 2,
   layer = 0,
   tooltip = "never", -- "always" or "out" (out of combat only)
-  nameplateUnits = "enemy",
   hideWhenDead = true,
   hideWhenOffline = true,
 }
@@ -166,10 +165,33 @@ function ns.ConvertNewLine(group)
   group.displays = list
 end
 
+-- `nameplateUnits` (older saves and import strings: "enemy", "friendly" or
+-- "all", nameplates only) becomes `reaction`, which applies to every unit.
+-- Unset still means enemies on nameplates. Takes a group or a display, and
+-- import tables after validation.
+local REACTIONS = { enemy = "enemy", friendly = "friendly", all = "any" }
+
+local function ConvertReaction(t)
+  local old = t.nameplateUnits
+  t.nameplateUnits = nil
+  if old ~= nil and t.reaction == nil then
+    t.reaction = REACTIONS[old]
+  end
+end
+
+function ns.ConvertNameplateUnits(group)
+  ConvertReaction(group)
+  for _, display in ns.Displays(group) do
+    ConvertReaction(display)
+  end
+end
+ns.ConvertReaction = ConvertReaction
+
 local function Clean(group)
   ns.MoveGroupFilter(group)
   ns.ConvertLineMax(group)
   ns.ConvertNewLine(group)
+  ns.ConvertNameplateUnits(group)
   for _, key in ipairs(RETIRED_KEYS) do
     group[key] = nil
   end
@@ -1312,8 +1334,9 @@ local function ReadState(host)
       and not (FRAMED[host.kind] and not (host.frame and host.frame:IsVisible()))
   state.plate = host.kind == "nameplate"
   if state.shown then
-    -- Polled, so a duel starting or a mind control is noticed too.
-    state.hostile = UnitCanAttack("player", unit)
+    -- Polled, so a duel starting or a mind control is noticed too. Blizzard's
+    -- target frame splits friend from enemy the same way (TargetFrame.lua:511).
+    state.friendly = UnitIsFriend("player", unit)
     state.dead = UnitIsDeadOrGhost(unit)
     state.offline = not UnitIsConnected(unit)
     state.visible = UnitIsVisible(unit)
@@ -1404,16 +1427,26 @@ local function SizeFits(op, size, actual)
   return actual == size
 end
 
+-- d.reaction: "enemy" (anyone not friendly, neutral creatures included),
+-- "friendly" or "any". Unset: enemies on nameplates, any unit elsewhere.
+local function ReactionFits(d)
+  local reaction = d.reaction or (state.plate and "enemy" or "any")
+  return reaction == "any" or (reaction == "friendly") == (state.friendly == true)
+end
+-- What an unset reaction means on a group showing on `target`, for the editor.
+function ns.ReactionDefault(target)
+  return (target == "nameplate" or type(target) == "table" and tContains(target, "nameplate")) and "enemy" or "any"
+end
+
 -- Never load, class and known spells aren't checked here: displays that fail
 -- them aren't built (Builds).
 local function Shows(d)
   if not state.shown then
     return false
   end
-  -- d.nameplateUnits: "enemy", "friendly" or "all". Test mode shows on any
-  -- plate, since in town most plates are friendly.
-  if state.plate and not testing and (d.nameplateUnits == "enemy" and not state.hostile
-        or d.nameplateUnits == "friendly" and state.hostile) then
+  -- Test mode ignores it: in town most plates are friendly, and a target's
+  -- friend and enemy sets both preview.
+  if not testing and not ReactionFits(d) then
     return false
   end
   if d.combat == "in" and not inCombat or d.combat == "out" and inCombat then
