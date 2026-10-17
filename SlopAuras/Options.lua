@@ -1238,6 +1238,7 @@ local function SharedTabs(t, isDisplay, extra)
           end
         end,
       },
+      unitCombat = ThreeWay("unitCombat", 3.2, "Combat state", "In combat", "Out of combat"),
       break1 = Break(3.9),
       unitPower = {
         type = "multiselect", order = 4, width = "full", values = POWER_VALUES,

@@ -278,7 +278,7 @@ below.
   stay in memory until `/reload`. Past `RELOAD_HINT` retired containers, the editor
   suggests a reload.
 - `UpdateAll` polls the **conditions** (combat, resting, mounted, group size, dead, offline,
-  visible, hostility, power type...) every 0.25s, because several have no event. Frames change
+  visible, hostility, the unit's combat, power type...) every 0.25s, because several have no event. Frames change
   only when a result changes. Class and known spells aren't polled per display: they
   decide what's built (above).
 
@@ -360,8 +360,8 @@ Use the labels exactly as below; they are what the player sees. The editor says 
     Mounted state; Group size (Any, At least, At most, Exactly) and Players, shown once a
     comparison is picked; Only if you know spell; Hide while you're dead, Never load) and
     a "Show on units that are" box (Alive, Online; Friend or enemy (Either, Enemies,
-    Friends), In sight (Automatic, Yes, Either); Power types, checkboxes for Mana, Rage,
-    Energy, Focus).
+    Friends), In sight (Automatic, Yes, Either), Combat state (the unit's: Any, In combat,
+    Out of combat); Power types, checkboxes for Mana, Rage, Energy, Focus).
   - **Import / export:** Move to group (with two or more groups), Export
     (with Include the group's values), Import new settings.
 - **Layout** (on the group's page): a Rows (or Columns) box: Grow, New rows go, Row spacing, Show only the
@@ -441,7 +441,8 @@ too), `glowInRange`, `combat`, `neverLoad`, `knownSpell` (an ID or list; negativ
 know; at least one positive must be known), `hideWhenPlayerDead`, `class`, `reaction`
 (`"enemy"`, `"friendly"`, `"any"`: `UnitIsFriend("player", unit)`, so neutral creatures are
 enemies; absent: enemies on nameplates, any unit elsewhere),
-`resting` and `mounted` (`true` only while, `false` only while not, `"any"`), `groupSizeOp`
+`resting`, `mounted` and `unitCombat` (the unit's `UnitAffectingCombat`) (`true` only
+while, `false` only while not, `"any"`), `groupSizeOp`
 (`"atLeast"`, `"atMost"`, `"exactly"`, `"any"`) and `groupSize` (1-40), compared with
 `GetNumGroupMembers()` (solo counts as 1; ignored without both), `hideWhenDead`,
 `hideWhenOffline`, `hideWhenNotVisible`, `unitPower` (a list of `MANA`, `RAGE`, `ENERGY`,

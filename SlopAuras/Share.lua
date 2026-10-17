@@ -289,6 +289,7 @@ local SHARED = {
   end,
   hideWhenDead = function() return Boolean end,
   hideWhenOffline = function() return Boolean end,
+  unitCombat = function() return ThreeWay end,
   unitPower = function() return ListOf(Set("MANA", "RAGE", "ENERGY", "FOCUS")) end,
   hideWhenNotVisible = function()
     return function(value, path)
