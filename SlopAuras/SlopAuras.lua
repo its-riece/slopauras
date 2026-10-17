@@ -1833,6 +1833,8 @@ local function WatchFrames()
   accepted.player = LGF.getDefaultPlayerFrames()
   accepted.target = LGF.getDefaultTargetFrames()
   accepted.focus = LGF.getDefaultFocusFrames()
+  -- Its player and target lists match any oUF layout; its focus list doesn't.
+  table.insert(accepted.focus, "^oUF_.-Focus$")
   for kind in pairs(SINGLE_UNITS) do
     ranking[kind] = accepted[kind]
   end

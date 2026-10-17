@@ -236,7 +236,8 @@ below.
 - Each host's frame comes from LibGetFrame (`FindUnitFrame`): the frames it lists for the
   unit that show exactly that token (`ShowsUnit`; its lookup also matches the same person
   under another token, e.g. a raid frame for `party1`), whose name is on LibGetFrame's
-  list for the kind (`accepted`: its player/target/focus lists, or its party + raid lists
+  list for the kind (`accepted`: its player/target/focus lists, the focus one plus
+  `^oUF_.-Focus$`, which it lacks, or its party + raid lists
   for group units, which keeps pet groups off `PetFrame`), best ranked first (`ranking`).
   A frame dropped from its list but still showing the unit is kept (`BestFrame`): it
   lists visible frames only.
