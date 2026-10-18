@@ -75,6 +75,13 @@ before relying on it.
   Fonts are fetched from LibSharedMedia by saved name, falling back to the text's own; a
   font registered later restyles everything if a display uses it
   (`LibSharedMedia_Registered`, `UsesFont`).
+- **Icons snap to whole pixels.** At most UI scales a UI unit isn't a whole number of
+  screen pixels, so each texture would round on its own and an icon's border could be a
+  pixel wider on one side. Every aura button (end of `StyleButton`) and missing icon (end
+  of `StyleMissing`) sets `PixelUtil.SetRoundLayoutToNearestPixelRecursively`
+  (`RoundToPixels`). It's per region, so it runs after the borders, glow and Masque's art
+  exist. Containers aren't rounded, so layout math in UI units is unchanged; in a long
+  row an icon or gap can come out 1px bigger.
 - **Child frames draw over parent textures.** The cooldown swipe is a child frame, so the
   count, borders and glow live on an overlay frame one level above it.
 - **Spell ID filters** (`includeSpellIDs` / `excludeSpellIDs`) only apply to buffs on

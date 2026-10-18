@@ -838,6 +838,18 @@ local function StyleTimerFormat(part, d)
   })
 end
 
+-- At most UI scales a UI unit isn't a whole number of screen pixels, so an
+-- icon's edges land between pixels and each texture rounds on its own: the
+-- icon, its border art and the frame underneath end up a pixel apart. The
+-- engine rounds every region's final rect to whole pixels instead, as
+-- Blizzard's nameplates do (Blizzard_NamePlateUnitFrame.lua). It's set per
+-- region, so it runs after the borders, glow and Masque's art exist. Aura
+-- buttons aren't secure frames, so it works in combat; a locked button
+-- refuses it.
+local function RoundToPixels(frame)
+  return pcall(PixelUtil.SetRoundLayoutToNearestPixelRecursively, frame, true)
+end
+
 -- Applies the display's look to one button's parts. Out of combat only.
 -- Returns false if Blizzard refused part of it.
 local function StyleButton(part, d)
@@ -896,7 +908,7 @@ local function StyleButton(part, d)
     part.glow, part.glowAnim = NewGlow(part.button)
   end
   if not part.glow then
-    return ok
+    return RoundToPixels(part.button) and ok
   end
   ok = StyleGlow(part.glow, d, skin) and ok
   local glow = d.glow and true or false
@@ -916,7 +928,7 @@ local function StyleButton(part, d)
   -- starts buttons that already show an aura.
   ShowGlow(part.glow, part.glowAnim, part.glowOn and GlowNow(d))
   ApplyRange(part.glow, d, part.inst.inRange)
-  return ok
+  return RoundToPixels(part.button) and ok
 end
 
 -- initializeFrame for a visible aura group: runs once per button the
@@ -1076,6 +1088,7 @@ local function StyleMissing(inst)
   -- Ours to play. It keeps looping while the icon is slid out of sight.
   ShowGlow(inst.glow, inst.glowAnim, inst.active and GlowNow(d))
   ApplyRange(inst.glow, d, inst.inRange)
+  RoundToPixels(inst.window)
 end
 
 -- A group showing only its first line (firstLine) builds its lines inside a
