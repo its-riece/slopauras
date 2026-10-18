@@ -22,7 +22,7 @@ Load order is the `.toc` order.
 | `Libs/` | LibStub, CallbackHandler, AceGUI-3.0, AceConfig-3.0 (editor only), LibSharedMedia-3.0 (fonts, LGPL v2.1), LibGetFrame-1.0 (unit frames, GPL v2; ForeverAuras' MINOR 79, which skips aura containers when scanning). |
 | `Ranks.lua` | Spell rank families (class spells), generated from talentsforever.com data (CC BY 4.0, credited in the file). Generated; don't hand-edit. `ns.SpellRanks(id)`. |
 | `Chain.lua` | Builds a group's lines out of AuraContainers and links them; buttons, borders, glow, missing icons. No saved-data knowledge beyond a display's keys. |
-| `SlopAuras.lua` | Saved settings and inheritance (`DEFAULTS`, `ns.Prepare`), rows and hosts, show/hide conditions, applying editor changes, events. |
+| `SlopAuras.lua` | Saved settings and inheritance (`DEFAULTS`, `ns.Prepare`), rows and hosts, show/hide conditions, applying editor changes, the `SlopAuras` global for other addons, events. |
 | `Share.lua` | Import/export strings: validation, export, import. |
 | `Options.lua` | The in-game editor (`/slop`), an AceConfig options table. |
 
@@ -203,6 +203,28 @@ below.
   went from 140 to 50 fps). `FollowPlate` copies the plate's alpha and scale onto rows that
   show something, in 0.05 steps. Screen/frame rows of all hosts join one strand (`Strand`).
   Nameplate lines add `INCLUDE_NAME_PLATE_ONLY` to their filters, as Blizzard's plates do.
+
+## For other addons (SlopAuras.lua, "For other addons")
+
+The `SlopAuras` global lets another addon place a frame by a group's rows, as a cast bar
+that moves with the target's auras. Groups are asked for by name: names are what a player
+picks, and imports assign new IDs.
+
+- `SlopAuras.GetTrailingAnchor(groupName, unit)`: a 1px frame on `UIParent`, centred where
+  a line after the group's last one would start on that unit's host (player, target,
+  focus, party and raid units; not nameplates), or nil (no such group, not built on this
+  character or that unit, no host yet). Made on first request, one per host and group
+  (`host.trails`, keyed by the group's table), and placed at the end of every `Relink`
+  (`PlaceTrail`, which uses `PlaceLine`'s rule through `PlaceAfter`). A row showing only
+  its first line puts it one line of its biggest icon past the origin while any line
+  shows, since Lua can't tell which line has auras. Its position can be secret; frames
+  anchored to it need `DisableUntrustedLayoutScriptsTemplate`.
+- `SlopAuras.GetGroups()`: `{ name, units, loaded }` for every named group, sorted by name;
+  `units` is the set from `target`, `loaded` whether a row config exists for it.
+- `SlopAuras.RegisterCallback(self, "GroupsChanged", method)` (CallbackHandler): fired at
+  most once per frame (`GroupsChanged`) after every apply (`Applied`, where `ns.OnApplied`
+  also runs), at the end of `Build` and when a unit host is added. Callers ask for anchors
+  again then: a renamed or deleted group's anchor stays where it last was.
 
 ## Masque (optional)
 

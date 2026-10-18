@@ -537,6 +537,7 @@ end
 local hosts = {} -- every host
 local unresolved = {} -- rows anchored to frames that don't exist yet
 local leaked = 0 -- containers retired by edits, in memory until /reload
+local GroupsChanged -- tells other addons (For other addons, below)
 
 -- "TargetFrame" or "PartyFrame.MemberFrame1" -> the frame, or nil.
 local function FindFrame(path)
@@ -1052,8 +1053,8 @@ end
 local function BuildRow(config, host)
   local group = config.group
   local row = {
-    group = group, g = Chain.Layout(group.growth, config.lines), signature = config.signature, shape = config.shape,
-    fingerprint = config.fingerprint,
+    group = group, host = host, g = Chain.Layout(group.growth, config.lines), signature = config.signature,
+    shape = config.shape, fingerprint = config.fingerprint,
   }
 
   -- Everything in the row hangs off this 1px frame. PlaceOrigin gives it its
@@ -1131,32 +1132,67 @@ local function LineInsts(row, i)
   return insts
 end
 
--- Places line `i`'s origin after line i - 1. A line with only aura icons
--- collapses with its container: the next line attaches to the container's far
--- edge (the 1px of an empty container cancelled), or straight to the line's
--- origin when the list is hidden. Containers can't measure a missing icon or
--- the tallest of several units' lines, so lines with missing displays, and
--- lines shared by several units, keep their full height.
-local function PlaceLine(strand, i)
+-- Attaches `frame`'s `point` where a line after line `i` starts. A line with
+-- only aura icons collapses with its container: the next line attaches to the
+-- container's far edge (the 1px of an empty container cancelled), or straight
+-- to the line's origin when the list is hidden. Containers can't measure a
+-- missing icon or the tallest of several units' lines, so lines with missing
+-- displays, and lines shared by several units, keep their full height.
+local function PlaceAfter(strand, i, frame, point)
   local first = strand[1]
-  local g, line, prev = first.g, first.lines[i], first.lines[i - 1]
-  line.origin:ClearAllPoints()
-  if #strand == 1 and #prev.missing == 0 then
-    local list = prev.list
+  local g, line = first.g, first.lines[i]
+  frame:ClearAllPoints()
+  if #strand == 1 and #line.missing == 0 then
+    local list = line.list
     if list and list.active then
       -- A centered line's shadow starts at the origin, so its edge is where
       -- the next line starts.
-      local frame, corner = list.main, g.attach
+      local container, corner = list.main, g.attach
       if g.shadow then
-        frame, corner = list.shadow, g.shadow.attach
+        container, corner = list.shadow, g.shadow.attach
       end
-      Chain.Anchor(line.origin, g.start, frame, corner, -g.cx, -g.cy)
+      Chain.Anchor(frame, point, container, corner, -g.cx, -g.cy)
     else
-      Chain.Anchor(line.origin, g.start, prev.origin, g.start)
+      Chain.Anchor(frame, point, line.origin, g.start)
     end
   else
-    local height = LineHeight(prev, first.group)
-    Chain.Anchor(line.origin, g.start, prev.origin, g.start, g.cx * height, g.cy * height)
+    local height = LineHeight(line, first.group)
+    Chain.Anchor(frame, point, line.origin, g.start, g.cx * height, g.cy * height)
+  end
+end
+
+local function PlaceLine(strand, i)
+  PlaceAfter(strand, i - 1, strand[1].lines[i].origin, strand[1].g.start)
+end
+
+-- A trailing anchor (SlopAuras.GetTrailingAnchor) is centred where a line
+-- after the row's last one would start. A row showing only its first line
+-- clips the rest in a window one line of its biggest icon deep, and Lua can't
+-- tell which line has auras (container sizes are secret), so there it's a
+-- line of the biggest icon past the origin while any line shows.
+local function PlaceTrail(strand, trail)
+  local first = strand[1]
+  local group, g = first.group, first.g
+  if #first.lines > 0 and not (group.firstLine and ns.SingleRow(group) and not ns.FirstLineConflict(group)) then
+    PlaceAfter(strand, #first.lines, trail, "CENTER")
+    return
+  end
+  local depth = 0
+  for i, line in ipairs(first.lines) do
+    if #LineInsts(first, i) > 0 then
+      depth = math.max(depth, LineHeight(line, group))
+    end
+  end
+  trail:ClearAllPoints()
+  Chain.Anchor(trail, "CENTER", first.origin, g.start, g.cx * depth, g.cy * depth)
+end
+
+local function PlaceTrails(strand)
+  for _, row in ipairs(strand) do
+    local trail = row.host.trails and row.host.trails[row.group]
+    if trail then
+      PlaceTrail(strand, trail)
+    end
   end
 end
 
@@ -1190,6 +1226,7 @@ local function Relink(strand)
       end
     end
   end
+  PlaceTrails(strand)
 end
 
 -- Rows waiting for Relink, keyed by row; a joined row's strand is relinked
@@ -1741,6 +1778,7 @@ local function AddUnitHost(unit, kind)
   if not unitHosts[unit] then
     unitHosts[unit] = NewHost(kind, unit, FindUnitFrame(kind, unit))
     UpdateHost(unitHosts[unit])
+    GroupsChanged()
   end
 end
 
@@ -2024,6 +2062,89 @@ function ns.Leaked()
   return leaked
 end
 
+-- For other addons -----------------------------------------------------------
+-- The SlopAuras global lets another addon place a frame by a group's rows, as
+-- a cast bar under the target's auras. Groups are named, not numbered: names
+-- are what a player picks and they survive imports, which assign new IDs.
+--
+-- SlopAuras.GetTrailingAnchor(groupName, unit): a 1px frame centred where a
+--   line after the group's last one would start on the unit (player, target,
+--   focus, party and raid units), moving as the rows fill and empty. nil when
+--   no group has that name, it isn't built on this character or that unit, or
+--   the unit has no host yet. Its position comes from aura containers, so it
+--   can be secret: never read it. A frame anchored to it needs
+--   DisableUntrustedLayoutScriptsTemplate, or the game refuses the anchor.
+-- SlopAuras.GetGroups(): every named group, sorted by name, as { name, units
+--   (the set of kinds in its Units), loaded (built on this character) }.
+-- SlopAuras.RegisterCallback(self, "GroupsChanged", method): fires after every
+--   apply of editor changes and when hosts appear. Ask for anchors again then:
+--   a renamed or deleted group's anchor stays where it last was.
+
+local api = {}
+SlopAuras = api
+local callbacks = LibStub("CallbackHandler-1.0"):New(api)
+
+-- Once per frame however many changes there were.
+local changeQueued = false
+
+function GroupsChanged()
+  if changeQueued then
+    return
+  end
+  changeQueued = true
+  C_Timer.After(0, function()
+    changeQueued = false
+    callbacks:Fire("GroupsChanged")
+  end)
+end
+
+local function Applied()
+  if ns.OnApplied then
+    ns.OnApplied()
+  end
+  GroupsChanged()
+end
+
+local function HostFor(unit)
+  return singleHosts[unit] or unitHosts[unit]
+end
+
+function api.GetTrailingAnchor(groupName, unit)
+  local host = HostFor(unit)
+  if not host then
+    return nil
+  end
+  for _, row in ipairs(host.rows) do
+    if row.group.name == groupName then
+      host.trails = host.trails or {}
+      local trail = host.trails[row.group]
+      if not trail then
+        trail = CreateFrame("Frame", nil, UIParent, "DisableUntrustedLayoutScriptsTemplate")
+        trail:SetSize(1, 1)
+        host.trails[row.group] = trail
+        PlaceTrail(Strand(row), trail)
+      end
+      return trail
+    end
+  end
+  return nil
+end
+
+function api.GetGroups()
+  local loaded = {}
+  for _, config in ipairs(rowConfigs) do
+    loaded[config.group] = true
+  end
+  local list = {}
+  for _, group in ipairs(ns.groups) do
+    if group.name then
+      table.insert(list, { name = group.name, units = TargetSet(group.target) or {}, loaded = loaded[group] == true })
+    end
+  end
+  table.sort(list, function(a, b) return a.name < b.name end)
+  return list
+end
+
 -- Pushes every setting to a host's rows. While auras are secret, buttons
 -- can't be restyled (SyncHost rebuilt every changed row instead), so only
 -- what's outside them is touched.
@@ -2070,9 +2191,7 @@ syncer:SetScript("OnUpdate", function(self)
   until #syncQueue == 0 or debugprofilestop() - start > BUILD_BUDGET_MS
   if #syncQueue == 0 then
     self:Hide()
-    if ns.OnApplied then
-      ns.OnApplied()
-    end
+    Applied()
   end
 end)
 
@@ -2134,9 +2253,7 @@ function ns.Changed(structural)
     local wasStructural = structuralPending
     structuralPending = false
     Apply(wasStructural)
-    if ns.OnApplied then
-      ns.OnApplied()
-    end
+    Applied()
   end)
 end
 
@@ -2168,6 +2285,7 @@ local function Build()
   built = true
   WatchFrames()
   UpdateAll()
+  GroupsChanged()
   -- Polled: some conditions (visible range, mounting, turning hostile) have no event.
   C_Timer.NewTicker(0.25, UpdateAll)
   ns.InitOptions()
