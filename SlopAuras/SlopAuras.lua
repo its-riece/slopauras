@@ -860,10 +860,12 @@ end
 -- Sizes a row's first line window (Chain.StyleFirstLine). Only a row on its
 -- own collapses empty lines (PlaceLine), so elsewhere the window shows every
 -- line, as it does while the icon sizes don't allow it (ns.FirstLineConflict).
+-- A priority stack's slots share one spot with no line after them, so its
+-- window doesn't clip past the icon either: that would cut a border there.
 local function StyleFirstLine(row)
   if row.firstLineWindow then
     local group = row.group
-    local clip = ns.SingleRow(group) and not ns.FirstLineConflict(group)
+    local clip = ns.SingleRow(group) and not ns.FirstLineConflict(group) and not ns.StackDisplays(group)
     local displays = {}
     for _, display in ns.Displays(group) do
       if Builds(display) then
