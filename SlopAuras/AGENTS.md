@@ -502,9 +502,7 @@ starts), `spellIDs` and
 
 On load, `LoadSettings` drops displays with any other `mode` and the retired keys in
 `RETIRED_KEYS` (SlopAuras.lua). A key that stops being used goes there, so old saves still
-export strings that import accepts. A group's `lineMax` (older saves and strings) is
-converted on load and import by `ns.ConvertLineMax`, and a display's `newLine` becomes a
-line break before it (`ns.ConvertNewLine`; a single display's string just drops it).
+export strings that import accepts.
 `nameplateUnits` (`"enemy"`, `"friendly"`, `"all"`, nameplates only) becomes `reaction` on
 load and import (`ns.ConvertNameplateUnits`, `ns.ConvertReaction`; `"all"` becomes `"any"`).
 

@@ -312,7 +312,6 @@ local DISPLAY_ONLY = {
   end,
   mode = function() return OneOf(Set("list", "missing")) end,
   filter = function() return Filter end,
-  newLine = function() return Boolean end, -- converted, see ns.ConvertNewLine
   wrap = function() return Integer(1, 40) end,
   lineCap = function() return Integer(1, 40) end,
   spellIDs = function() return SpellIDs end,
@@ -382,7 +381,6 @@ local GROUP_ONLY = {
   growth = function() return OneOf(ns.Chain.GROWTHS) end,
   lines = function() return OneOf(Set("UP", "DOWN", "LEFT", "RIGHT")) end,
   lineSpacing = function() return Number(0, 40) end,
-  lineMax = function() return Integer(1, 40) end, -- converted, see ns.ConvertLineMax
   firstLine = function() return Boolean end,
   layer = function() return Integer(1, 10) end,
   displays = function()
@@ -441,17 +439,12 @@ local function ValidateGroup(value, path)
     Fail(path, "needs a name")
   end
   group.displays = group.displays or {}
-  ns.ConvertLineMax(group)
-  ns.ConvertNewLine(group)
   ns.ConvertNameplateUnits(group)
   return group
 end
 
--- A display on its own takes its line from where it's put, so an older
--- string's newLine is dropped.
 local function ValidateOneDisplay(value)
   local display = ValidateDisplay(value, "display")
-  display.newLine = nil
   ns.ConvertReaction(display)
   return display
 end

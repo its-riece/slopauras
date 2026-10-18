@@ -108,7 +108,7 @@ end
 local MODES = { list = true, missing = true, ["break"] = true }
 -- Keys nothing reads any more. Export writes every raw key and import rejects
 -- unknown ones, so they're dropped too.
-local RETIRED_KEYS = { "locHide", "labelSize" }
+local RETIRED_KEYS = { "locHide", "labelSize", "lineMax", "newLine" }
 
 -- Filters belong to displays only. A group's filter, from older saves and
 -- import strings, moves to each display without its own. Also takes
@@ -124,45 +124,6 @@ function ns.MoveGroupFilter(group)
       display.filter = filter
     end
   end
-end
-
--- `lineMax` (older saves and import strings) showed only the first N icons of
--- each line. With one line and N = 1 it picked one icon by display order: the
--- same as each display on its own line, showing one icon, and only the first
--- line showing. Other uses have no equivalent and show every icon. Also takes
--- import tables, after validation.
-function ns.ConvertLineMax(group)
-  local cap = group.lineMax
-  group.lineMax = nil
-  if cap ~= 1 or group.growth == "CENTER" or group.growth == "CENTER_VERTICAL" then
-    return -- centered lines ignored it
-  end
-  for n, display in ns.Displays(group) do
-    if n > 1 and display.newLine then
-      return
-    end
-  end
-  group.firstLine = true
-  for n, display in ns.Displays(group) do
-    display.newLine = n > 1 or nil
-    display.max = 1
-  end
-end
-
--- `newLine` (older saves and import strings) marked a display that starts a
--- line. It becomes a line break before that display. Also takes import
--- tables, after validation.
-function ns.ConvertNewLine(group)
-  local list = {}
-  for _, entry in ipairs(group.displays) do
-    local last = list[#list]
-    if entry.newLine and last and last.mode ~= "break" then
-      table.insert(list, { mode = "break" })
-    end
-    entry.newLine = nil
-    table.insert(list, entry)
-  end
-  group.displays = list
 end
 
 -- `nameplateUnits` (older saves and import strings: "enemy", "friendly" or
@@ -189,8 +150,6 @@ ns.ConvertReaction = ConvertReaction
 
 local function Clean(group)
   ns.MoveGroupFilter(group)
-  ns.ConvertLineMax(group)
-  ns.ConvertNewLine(group)
   ns.ConvertNameplateUnits(group)
   for _, key in ipairs(RETIRED_KEYS) do
     group[key] = nil
