@@ -268,25 +268,33 @@ picks, and imports assign new IDs.
   list for the kind (`accepted`: its player/target/focus lists, the focus one plus
   `^oUF_.-Focus$`, which it lacks, or its party + raid lists
   for group units, which keeps pet groups off `PetFrame`), best ranked first (`ranking`).
+  Party and raid member hosts skip slots of a pet header (`OnPetHeader`: its `OnEvent` is
+  `SecureGroupPetHeader_OnEvent`), where test modes also show "player". Among equally
+  ranked frames the host keeps the one it has, so rebinds don't move rows between them.
   A frame dropped from its list but still showing the unit is kept (`BestFrame`): it
   lists visible frames only.
 - `Rebind` gives every host its frame; `SetHostFrame` moves rows (`PlaceOrigin`
   reparents via `RowParent` and re-anchors), which works in combat and while auras are
   secret. Rebinds are requested (`RequestRebind`, once per frame) by LibGetFrame's
   `GETFRAME_REFRESH`, the roster refresh, target/focus changes while the host has no
-  frame, `AURA_DATA_PROVIDER_SWITCH`, and hooks on `CompactUnitFrame_SetUnit` and
-  `Grid2:SetFrameUnit`. The hooks also ask LibGetFrame to rescan: its list only updates
-  on a scan (about a second after its own events), but it reads listed frames' units
-  live, so the hooks make unit changes on those frames immediate.
+  frame, `AURA_DATA_PROVIDER_SWITCH`, and hooks on `CompactUnitFrame_SetUnit` (Blizzard's
+  frames), `SecureGroupHeader_Update` and `SecureGroupPetHeader_Update` (any frame addon
+  on Blizzard's secure group headers). The hooks also ask LibGetFrame to rescan: its list
+  only updates on a scan (about a second after its own events), but it reads listed
+  frames' units live, so the hooks make unit changes on those frames immediate. No code
+  is specific to one frame addon: frames that change units another way (insecure headers,
+  such as Grid2's test mode) wait for LibGetFrame's next scan; turning on SlopAuras' test
+  mode starts one.
 - Party and raid hosts show only while they have a visible frame (`FRAMED` in
   `ReadState`); rows anchored to "each unit's own frame" hide while the host has no frame
   (`UpdateHost`). On party/raid hosts every row is a child of the frame; on you, target
   and focus only unit-anchored rows are.
-- **Previews:** Edit Mode's party/raid frames and Grid2's test mode show unit "player" in
-  empty slots. While placeholder auras are on (`placeholders`: Edit Mode or test mode),
-  every party/raid-list frame showing "player", except your own party host's frame, gets
-  a preview host (`previewHosts`, `SyncPreviews`): party rows on party-list frames, raid
-  rows on the rest (`PreviewKind`).
+- **Previews:** Edit Mode's party/raid frames and frame addons' test modes show unit
+  "player" in empty slots. While placeholder auras are on (`placeholders`: Edit
+  Mode or test mode), every party/raid-list frame showing "player", except your own party
+  host's frame, gets a preview host (`previewHosts`, `SyncPreviews`): party rows on
+  party-list frames, raid rows on the rest, and party pet or raid pet rows on a pet
+  header's slots (`PreviewKind`).
 - `EachGroupHost` visits unit and preview hosts.
 
 ## Applying changes

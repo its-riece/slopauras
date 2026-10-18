@@ -1657,9 +1657,11 @@ end
 --
 -- Frames come from LibGetFrame. It keeps a list of every visible unit button,
 -- made by walking the UI after group, pet and combat events (about a second
--- later), but reads each listed frame's unit when asked. So when Blizzard or
--- Grid2 give a frame a new unit, the hooks below look again at once and ask
--- for a new list, which picks up frames that just appeared.
+-- later), but reads each listed frame's unit when asked. So when Blizzard's
+-- frames or a secure group header give a frame a new unit, the hooks below
+-- look again at once and ask for a new list, which picks up frames that just
+-- appeared. Frames that change units any other way wait for LibGetFrame's
+-- next scan.
 
 local LGF = LibStub("LibGetFrame-1.0")
 
@@ -1719,6 +1721,18 @@ local function Accepts(kind, frame)
   return Rank(frame, accepted[kind]) <= #accepted[kind]
 end
 
+-- Whether `frame` is a slot of a secure pet header. A pet header's OnEvent
+-- comes from SecureGroupPetHeaderTemplate (SecureGroupHeaders.xml).
+-- Registered events can't tell: Blizzard's raid container registers UNIT_PET
+-- too.
+local function OnPetHeader(frame)
+  local header = frame:GetParent()
+  return header ~= nil and header:GetScript("OnEvent") == SecureGroupPetHeader_OnEvent
+end
+
+-- Kinds whose units are players. Test modes put "player" in pet slots too.
+local MEMBER_KINDS = { party = true, raid = true }
+
 -- The frames LibGetFrame lists for `unit` that show exactly that token and
 -- are accepted for `kind`. Its lookup also counts a frame showing the same
 -- person under another token (a raid frame for "party1"), which would put
@@ -1734,16 +1748,20 @@ local function UnitFrames(kind, unit)
   return found
 end
 
--- The best frame showing `unit`, or nil.
-local function FindUnitFrame(kind, unit)
+-- The best frame showing `unit`, or nil. A member's rows never go on a pet
+-- slot. Of equally ranked frames (a test mode shows "player" in every slot),
+-- `current` is kept, so rebinds don't move the rows between them.
+local function FindUnitFrame(kind, unit, current)
   if not UnitExists(unit) then
     return nil
   end
   local best, bestRank
   for _, frame in ipairs(UnitFrames(kind, unit)) do
-    local rank = Rank(frame, ranking[kind])
-    if not best or rank < bestRank then
-      best, bestRank = frame, rank
+    if not (MEMBER_KINDS[kind] and OnPetHeader(frame)) then
+      local rank = Rank(frame, ranking[kind])
+      if not best or rank < bestRank or rank == bestRank and frame == current then
+        best, bestRank = frame, rank
+      end
     end
   end
   return best
@@ -1765,7 +1783,7 @@ end
 -- a target frame while you have no target) is kept while it still shows the
 -- unit; its rows hide with it.
 local function BestFrame(kind, unit, host)
-  local frame = FindUnitFrame(kind, unit)
+  local frame = FindUnitFrame(kind, unit, host and host.frame)
   if not frame and host and ShowsUnit(host.frame, unit) then
     frame = host.frame
   end
@@ -1811,15 +1829,16 @@ local function QueueHost(key, kind, add)
   end
 end
 
--- Previews: Edit Mode's party and raid frames and Grid2's test mode fill
--- their empty slots with unit "player" (CompactPartyFrame.lua:176, Grid2's
--- SetupTestMode in GridGroupHeaders.lua). While the game shows placeholder
--- auras (Edit Mode or test mode), each such frame gets a host of its own
--- showing the rows of a real member: party rows on party frames, raid rows
--- on the rest. Your own frame keeps its party host.
+-- Previews: Edit Mode's party and raid frames (CompactPartyFrame.lua:176)
+-- and frame addons' test modes fill their empty slots with unit "player".
+-- While the game shows placeholder auras (Edit Mode or test mode), each such
+-- frame gets a host of its own showing the rows of a real member: party rows
+-- on party frames, raid rows on the rest, and pet rows on the slots of a pet
+-- header. Your own frame keeps its party host.
 
 local function PreviewKind(frame)
-  return Rank(frame, partyPatterns) <= #partyPatterns and "party" or "raid"
+  local kind = Rank(frame, partyPatterns) <= #partyPatterns and "party" or "raid"
+  return OnPetHeader(frame) and kind .. "pet" or kind
 end
 
 local function AddPreviewHost(frame, kind)
@@ -1906,6 +1925,17 @@ hooksecurefunc("CompactUnitFrame_SetUnit", function(frame)
   end
 end)
 
+-- Group frames built on Blizzard's secure group headers get their units in
+-- the header's update, after roster changes and attribute changes. Test
+-- slots that an addon fills right after the update are in place by the next
+-- frame, when the rebind runs.
+hooksecurefunc("SecureGroupHeader_Update", function()
+  RequestRebind(true)
+end)
+hooksecurefunc("SecureGroupPetHeader_Update", function()
+  RequestRebind(true)
+end)
+
 local function WatchFrames()
   accepted.player = LGF.getDefaultPlayerFrames()
   accepted.target = LGF.getDefaultTargetFrames()
@@ -1926,14 +1956,6 @@ local function WatchFrames()
   LGF.RegisterCallback(ns, "GETFRAME_REFRESH", function()
     RequestRebind(false)
   end)
-  -- Grid2 routes every unit change on its frames through SetFrameUnit
-  -- (GridFrame.lua), test mode included.
-  local grid2 = _G.Grid2
-  if grid2 and grid2.SetFrameUnit then
-    hooksecurefunc(grid2, "SetFrameUnit", function()
-      RequestRebind(true)
-    end)
-  end
   -- LibGetFrame starts listing frames on its first lookup.
   LGF.GetUnitFrame("player")
   Rebind()
