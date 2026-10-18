@@ -404,7 +404,7 @@ Use the labels exactly as below; they are what the player sees. The editor says 
     Mounted state; Group size (Any, At least, At most, Exactly) and Players, shown once a
     comparison is picked; Only if you know spell; Hide while you're dead, Never load) and
     a "Show on units that are" box (Alive, Online; Friend or enemy (Either, Enemies,
-    Friends), In sight (Automatic, Yes, Either), Combat state (the unit's: Any, In combat,
+    Friends), Range (Automatic, In range, Any: the distance the game draws units at, `UnitIsVisible`), Combat state (the unit's: Any, In combat,
     Out of combat); Power types, checkboxes for Mana, Rage, Energy, Focus).
   - **Import / export:** Move to group (with two or more groups), Export
     (with Include the group's values), Import new settings.

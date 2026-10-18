@@ -865,8 +865,8 @@ local function SharedTabs(t, isDisplay, extra)
         rowBreak = Break(2.5),
         outOfRange = Resettable({
           type = "toggle", order = 3, width = 1.5, name = Label("glowInRange", "Out of range", true),
-          desc = Desc("glowInRange", "Party and raid members only. Hides glows when units are out of range/faded out. "
-            .. "In combat or bgs, always glows."),
+          desc = Desc("glowInRange", "Keeps glowing on party and raid members who are out of range. "
+            .. "In combat and battlegrounds it glows at any range."),
           get = function() return not t.glowInRange end,
           -- A display saves false so it can override a group's true.
           set = function(_, value) Set("glowInRange", not value or Off()) end,
@@ -1207,8 +1207,8 @@ local function SharedTabs(t, isDisplay, extra)
       break0 = Break(2.9),
       reaction = Resettable({
         type = "select", order = 3, name = Label("reaction", "Friend or enemy"),
-        desc = Desc("reaction", "Enemies include neutral creatures and unflagged players of the other faction. "
-          .. "Friendly nameplates only appear outside instances, and only if you turn them on in the game's options."),
+        desc = Desc("reaction", "Neutral creatures and players of the other faction count as enemies.\n\n"
+          .. "Friendly nameplate displays won't work in instances."),
         values = { any = "Either", enemy = "Enemies", friendly = "Friends" },
         sorting = { "any", "enemy", "friendly" },
         -- Unset means enemies on nameplate groups, either elsewhere.
@@ -1219,11 +1219,10 @@ local function SharedTabs(t, isDisplay, extra)
         end,
       }, "reaction"),
       hideWhenNotVisible = {
-        type = "select", order = 3.1, name = Label("hideWhenNotVisible", "In sight"),
-        desc = Desc("hideWhenNotVisible", "Beyond the range the game draws units at, filters match the wrong auras. "
-          .. "Spell IDs still match the right ones. Automatic shows filter displays only in sight and spell ID "
-          .. "displays at any range."),
-        values = { auto = "Automatic", yes = "Yes", no = "Either" },
+        type = "select", order = 3.1, name = Label("hideWhenNotVisible", "Range"),
+        desc = Desc("hideWhenNotVisible", "Only spell ID filters work on units that are very far away. "
+          .. "\"Automatic\" picks \"In range\" for most displays and \"Any\" for displays with spell ID filters."),
+        values = { auto = "Automatic", yes = "In range", no = "Any" },
         sorting = { "auto", "yes", "no" },
         get = function()
           local value = t.hideWhenNotVisible
@@ -1238,7 +1237,8 @@ local function SharedTabs(t, isDisplay, extra)
           end
         end,
       },
-      unitCombat = ThreeWay("unitCombat", 3.2, "Combat state", "In combat", "Out of combat"),
+      unitCombat = ThreeWay("unitCombat", 3.2, "Combat state", "In combat", "Out of combat",
+        "This unit's combat state"),
       break1 = Break(3.9),
       unitPower = {
         type = "multiselect", order = 4, width = "full", values = POWER_VALUES,
