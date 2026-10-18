@@ -1204,6 +1204,9 @@ end
 local function Relink(strand)
   local first = strand[1]
   local g = first.g
+  for _, row in ipairs(strand) do
+    Chain.RefreshClip(row.firstLineWindow)
+  end
   for i, line in ipairs(first.lines) do
     if i > 1 then
       PlaceLine(strand, i)

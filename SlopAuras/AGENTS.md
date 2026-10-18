@@ -56,6 +56,13 @@ before relying on it.
   (`GlowCopies`), and range glows show fully while secret (`Chain.HoldRange`).
 - **Frames anchored to a container** (or to anything inside one) need
   `DisableUntrustedLayoutScriptsTemplate`, or the game refuses the anchor.
+- **Clip windows can clip to nothing.** A `SetClipsChildren` window (missing icon, capped
+  line, first line) whose clipping is on before the game can work out its area keeps
+  clipping to nothing once the area is known, hiding everything in it while every frame
+  reads as shown. Its area hangs off containers that lay out later, which happens to rows
+  built on unit frames. Turning clipping off and on fixes it: every placement does that,
+  and a window whose `IsRectValid` is false is watched each frame until it's true
+  (`Chain.RefreshClip`, from `Chain.Link` and `Relink`).
 - **You can only set up a button in `initializeFrame`.** Register its regions there
   (`SetIcon`, `SetDurationCooldown`, `SetApplicationCount`, `AddDispelTypeTexture`);
   Blizzard fills them from secret data. While auras aren't secret you can change size, tint and the

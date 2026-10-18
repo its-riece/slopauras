@@ -1503,11 +1503,53 @@ function Chain.Configure(inst, g, lineSpacing)
   return ok
 end
 
+-- A clip window turned on before the game can work out its area keeps
+-- clipping to nothing once the area is known, hiding everything in it, until
+-- clipping is turned off and on again. Its area depends on containers that
+-- lay out later, so each placement turns clipping off and on, and a window
+-- whose area isn't known yet (IsRectValid) is watched until it is.
+local pendingClips = {}
+
+local function Reclip(window)
+  window:SetClipsChildren(false)
+  window:SetClipsChildren(true)
+end
+
+local clipWatcher = CreateFrame("Frame")
+clipWatcher:Hide()
+clipWatcher:SetScript("OnUpdate", function(self)
+  for window in pairs(pendingClips) do
+    local valid = window:IsRectValid()
+    if issecretvalue(valid) or valid then
+      pendingClips[window] = nil
+      Reclip(window)
+    end
+  end
+  if not next(pendingClips) then
+    self:Hide()
+  end
+end)
+
+function Chain.RefreshClip(window)
+  if not window then
+    return
+  end
+  Reclip(window)
+  local valid = window:IsRectValid()
+  if not issecretvalue(valid) and not valid then
+    pendingClips[window] = true
+    clipWatcher:Show()
+  end
+end
+
 -- Places a line's container (or its shadow) at `from` ({ frame, point, x, y })
 -- and returns where the next one starts.
 function Chain.Link(inst, from, g, shadow)
   local container = shadow and inst.shadow or inst.main
   container:ClearAllPoints()
+  if not shadow then
+    Chain.RefreshClip(inst.window or inst.capWindow)
+  end
 
   if inst.window then
     local d = inst.display
