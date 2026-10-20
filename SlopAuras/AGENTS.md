@@ -346,6 +346,12 @@ picks, and imports assign new IDs.
   class, "Only if you know spell"); the entry's `desc` says why (`NotLoadedText`,
   `GroupNotLoadedText`). A group is gray when none of its displays build or its own class
   rules it out. Show/hide conditions don't count.
+- Each display's Inspect tab takes a snapshot through `ns.InspectDisplay`: choose a
+  unit and use Refresh after game state changes. It reports the first blocking build
+  or visibility condition, its setting's source, missing unit frames and named anchor
+  fallback. `Shows` returns the blocking reason alongside its boolean, so the inspector
+  uses the runtime's conditions. A passing condition means the display is allowed,
+  not that an aura matched. It never reads auras, buttons or container geometry.
 - Right-click on a control clears a display's own value (`HookWidgets`, `Resettable`).
 - `SharedTabs` builds the three tabs a group and a display share: Appearance, Text and Load
   conditions. Appearance is built flat, then grouped into sections (Arrangement, Icon,
@@ -408,6 +414,8 @@ Use the labels exactly as below; they are what the player sees. The editor says 
     Out of combat); Power types, checkboxes for Mana, Rage, Energy, Focus).
   - **Import / export:** Move to group (with two or more groups), Export
     (with Include the group's values), Import new settings.
+  - **Inspect:** Unit, current load and anchor explanations, Refresh. Test mode and
+    spell-ID matching restrictions appear alongside the result when applicable.
 - **Layout** (on the group's page): a Rows (or Columns) box: Grow, New rows go, Row spacing, Show only the
   first row (only for a group with one row per unit: anchored to each unit's own frame, or
   showing just one of You, Your target, Your focus; `ns.SingleRow`). An Anchor box: Anchor to (Each

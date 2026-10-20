@@ -1331,8 +1331,15 @@ local FRAMED = { party = true, partypet = true, raid = true, raidpet = true, nam
 
 local function ReadState(host)
   local unit = host.unit
-  state.shown = unit ~= nil and UnitExists(unit)
-      and not (FRAMED[host.kind] and not (host.frame and host.frame:IsVisible()))
+  state.unavailable = nil
+  if not (unit and UnitExists(unit)) then
+    state.unavailable = "noUnit"
+  elseif FRAMED[host.kind] and not host.frame then
+    state.unavailable = "noFrame"
+  elseif FRAMED[host.kind] and not host.frame:IsVisible() then
+    state.unavailable = "frameHidden"
+  end
+  state.shown = state.unavailable == nil
   state.plate = host.kind == "nameplate"
   if state.shown then
     -- Polled, so a duel starting or a mind control is noticed too. Blizzard's
@@ -1441,38 +1448,44 @@ function ns.ReactionDefault(target)
 end
 
 -- Never load, class and known spells aren't checked here: displays that fail
--- them aren't built (Builds).
+-- them aren't built (Builds). The second return names the blocking condition
+-- for the editor's inspector.
 local function Shows(d)
   if not state.shown then
-    return false
+    return false, state.unavailable
   end
   -- Test mode ignores it: in town most plates are friendly, and a target's
   -- friend and enemy sets both preview.
   if not testing and not ReactionFits(d) then
-    return false
+    return false, "reaction"
   end
   if d.combat == "in" and not inCombat or d.combat == "out" and inCombat then
-    return false
+    return false, "combat"
   end
-  if d.hideWhenDead and state.dead or d.hideWhenOffline and state.offline then
-    return false
+  if d.hideWhenDead and state.dead then
+    return false, "hideWhenDead"
+  elseif d.hideWhenOffline and state.offline then
+    return false, "hideWhenOffline"
   end
   if not Wants(d.unitCombat, state.unitCombat) then
-    return false
+    return false, "unitCombat"
   end
   -- An empty list (a display overriding its group) means any power. A unit
   -- with no power token matches nothing.
   local power = d.unitPower
   if power and #power > 0 and not (state.power and tContains(power, state.power)) then
-    return false
+    return false, "unitPower"
   end
-  if not Wants(d.resting, state.resting) or not Wants(d.mounted, state.mounted)
-      or d.hideWhenPlayerDead and state.playerDead then
-    return false
+  if not Wants(d.resting, state.resting) then
+    return false, "resting"
+  elseif not Wants(d.mounted, state.mounted) then
+    return false, "mounted"
+  elseif d.hideWhenPlayerDead and state.playerDead then
+    return false, "hideWhenPlayerDead"
   end
   -- Test mode ignores it, so a set made for big raids can be previewed solo.
   if not testing and not SizeFits(d.groupSizeOp, d.groupSize, state.groupSize) then
-    return false
+    return false, "groupSizeOp"
   end
   -- Beyond the visible range, flag tokens and PLAYER match the wrong auras;
   -- spell-ID filters stay correct.
@@ -1481,7 +1494,7 @@ local function Shows(d)
     notVisible = not Chain.MatchesByID(d)
   end
   if notVisible and not state.visible then
-    return false
+    return false, "hideWhenNotVisible"
   end
 
   return true
@@ -2031,6 +2044,64 @@ local function CatchUpPlates()
       OnPlateAdded(unit)
     end
   end
+end
+
+-- Inspector snapshots use the same conditions as UpdateLine, without reading
+-- aura buttons or container geometry. A passing condition isn't an aura match.
+function ns.InspectDisplay(group, display)
+  local targets = TargetSet(group.target)
+  local reason = not ClassAllowed(group) and "groupClass" or ns.NotBuiltReason(display)
+  if not reason and (not targets or not next(targets)) then
+    reason = "noUnits"
+  end
+  if reason then
+    return { { key = "all", reason = reason } }
+  end
+
+  local reports, found = {}, {}
+  for _, host in ipairs(orderedHosts) do
+    if targets[host.kind] and host.unit then
+      found[host.kind] = true
+      ReadState(host)
+      local _, why = Shows(display)
+      if testing and not testGroups[group] then
+        why = "testExcluded"
+      elseif group.anchorTo == "unit" and not host.frame then
+        why = "noFrame"
+      elseif restoring and Chain.TestFaked(display, display.mode == "missing") then
+        why = "restoring"
+      end
+      if not why then
+        local built = false
+        for _, row in ipairs(host.rows) do
+          built = built or row.group == group
+        end
+        if not built then
+          why = "pending"
+        end
+      end
+      local _, anchorFound = AnchorFrame(group, host)
+      table.insert(reports, {
+        key = tostring(host.rank), kind = host.kind, unit = host.unit, reason = why,
+        anchorMissing = not anchorFound,
+        preview = previewHosts[host.frame] == host,
+        testing = testing, secret = C_Secrets.ShouldAurasBeSecret(),
+      })
+    end
+  end
+  for kind in pairs(targets) do
+    if not found[kind] then
+      table.insert(reports, { key = kind, kind = kind, reason = "noHost" })
+    end
+  end
+  table.sort(reports, function(a, b)
+    local left, right = KIND_ORDER[a.kind], KIND_ORDER[b.kind]
+    if left ~= right then
+      return left < right
+    end
+    return a.key < b.key
+  end)
+  return reports
 end
 
 -- Editor changes -------------------------------------------------------------

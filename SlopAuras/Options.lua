@@ -1812,6 +1812,133 @@ local function DispelTypesBox(display)
   return { type = "group", inline = true, order = 6.5, name = "Dispel types (none ticked: any)", args = args }
 end
 
+local INSPECT_REASONS = {
+  noUnits = "The group has no units selected",
+  noUnit = "This unit does not exist",
+  noFrame = "No frame was found for this unit",
+  frameHidden = "This unit's frame is hidden",
+  noHost = "No units with frames are available",
+  reaction = "Friend or enemy excludes this unit",
+  combat = "Your Combat state excludes the current state",
+  hideWhenDead = "Alive excludes this dead unit",
+  hideWhenOffline = "Online excludes this offline unit",
+  unitCombat = "The unit's Combat state excludes the current state",
+  unitPower = "Power types excludes this unit's current power type",
+  resting = "Resting state excludes the current state",
+  mounted = "Mounted state excludes the current state",
+  hideWhenPlayerDead = "Hide while you're dead is on",
+  groupSizeOp = "Group size excludes the current group size",
+  hideWhenNotVisible = "Range excludes this unit beyond the distance the game draws units at",
+  testExcluded = "This group is excluded from Test mode",
+  restoring = "The display is waiting for its real filters after Test mode",
+  pending = "The group's frames are waiting to be built",
+}
+
+local inspectUnits = setmetatable({}, { __mode = "k" })
+
+-- A snapshot stays fixed until Refresh or another editor redraw. Polling the
+-- options table would interrupt controls while the player changes settings.
+local function InspectTab(group, display)
+  local reports
+  local function Reports()
+    reports = reports or ns.InspectDisplay(group, display)
+    return reports
+  end
+  local function Selected()
+    for _, report in ipairs(Reports()) do
+      if report.key == inspectUnits[display] then
+        return report
+      end
+    end
+    return Reports()[1]
+  end
+  local function Label(report)
+    for _, target in ipairs(TARGETS) do
+      if target[1] == report.kind then
+        local label = target[2] .. (report.unit and ": " .. report.unit or "")
+        return report.preview and label .. " (preview)" or label
+      end
+    end
+    return "This display"
+  end
+  local function Explanation()
+    local report = Selected()
+    local reason = report.reason
+    local lines = {}
+    if reason == "groupClass" then
+      table.insert(lines, "Not loaded. The group " .. ClassesReason(group.class, true))
+    elseif reason == "never" or reason == "class" or reason == "spell" then
+      table.insert(lines, "Not loaded. " .. NotLoadedText(display))
+    elseif reason then
+      table.insert(lines, INSPECT_REASONS[reason])
+      if display[reason] ~= nil or reason == "reaction" or reason == "hideWhenNotVisible" then
+        local source = rawget(display, reason) ~= nil and "This display"
+            or rawget(group, reason) ~= nil and "Shared display settings" or "Default settings"
+        table.insert(lines, "Setting comes from: " .. source)
+      end
+    else
+      table.insert(lines, "Load conditions allow this display on this unit")
+      table.insert(lines, "The game controls aura matching and which icons appear")
+    end
+    if report.anchorMissing then
+      table.insert(lines, "The named anchor frame was not found; the group falls back to the screen")
+    end
+    if report.testing then
+      table.insert(lines, "Test mode uses placeholder auras and ignores Friend or enemy and Group size")
+      if ns.Chain.TestFaked(display, display.mode == "missing") then
+        table.insert(lines, "Test mode replaces this display's aura matching filters")
+      end
+    end
+    if ns.Chain.MatchesByID(display) then
+      table.insert(lines, "Spell IDs match friendly buffs, enemy debuffs and spells the game marks never secret")
+    end
+    if report.secret then
+      table.insert(lines, "Auras are secret; this inspector checks load conditions and anchors")
+    end
+    return table.concat(lines, "\n\n")
+  end
+  return {
+    type = "group", order = 6, name = "Inspect",
+    args = {
+      unit = {
+        type = "select", order = 1, width = "full", name = "Unit",
+        values = function()
+          local values = {}
+          for _, report in ipairs(Reports()) do
+            values[report.key] = Label(report)
+          end
+          return values
+        end,
+        sorting = function()
+          local keys = {}
+          for _, report in ipairs(Reports()) do
+            table.insert(keys, report.key)
+          end
+          return keys
+        end,
+        get = function() return Selected().key end,
+        set = function(_, key)
+          inspectUnits[display] = key
+          Refresh()
+        end,
+      },
+      unitRow = Break(1.5),
+      result = { type = "description", order = 2, width = "full", name = Explanation },
+      resultRow = Break(2.5),
+      snapshot = {
+        type = "description", order = 2.6, width = "full",
+        name = "Use Refresh to check conditions after the game state changes",
+      },
+      snapshotRow = Break(2.7),
+      refresh = Button(3, 0.7, "Refresh", "Checks current load conditions and anchors", function()
+        reports = nil
+        Refresh()
+      end),
+      refreshRow = Break(3.5),
+    },
+  }
+end
+
 -- `index`: the display's place in the group's list, line breaks included,
 -- which also keys its tree entry; `number`: its place among the displays.
 local function DisplayOptions(group, display, index, number)
@@ -2024,6 +2151,7 @@ local function DisplayOptions(group, display, index, number)
       text = text,
       load = load,
       share = DisplayShareTab(group, display, index),
+      inspect = InspectTab(group, display),
     },
   }
 end
