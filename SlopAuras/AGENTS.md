@@ -25,6 +25,7 @@ Load order is the `.toc` order.
 | `SlopAuras.lua` | Saved settings and inheritance (`DEFAULTS`, `ns.Prepare`), rows and hosts, show/hide conditions, applying editor changes, the `SlopAuras` global for other addons, events. |
 | `Share.lua` | Import/export strings: validation, export, import. |
 | `Options.lua` | The in-game editor (`/slop`), an AceConfig options table. |
+| `Layout.lua` | Visual layout studio, anchor handles and position undo, using public AceGUI widgets. |
 
 ## Platform rules that shape the code
 
@@ -355,13 +356,25 @@ picks, and imports assign new IDs.
   of 170px; a tab group fills to the panel bottom (nothing can sit below it); a description
   has one font size.
 - WoW edit boxes double a typed `|`; `CleanFilter` collapses the runs when a filter saves.
+- **Layout studio** opens from the editor's top page or a group's Anchor box. It opens
+  the sample aura provider and closes the main editor and test window. `Layout.lua` shows one
+  labeled handle at each group's fixed placement origin (one per host for unit anchors).
+  A gold pin marks the saved anchor point; handles never measure aura containers or
+  buttons. Dragging uses cursor deltas divided by the origin's effective scale and
+  `MoveLayoutGroup` places every copy immediately; the usual apply runs after the drag.
+  Snap rounds dragged offsets to multiples of 8; nudges and X/Y inputs remain precise.
+  Center anchor X/Y aligns screen anchors to the screen center, respecting the saved
+  relative point and scale. Offsets keep the existing -2000 to 2000 limits.
+  Undo restores the preceding position edit; Revert positions restores all positions
+  edited since opening. Closing keeps positions and ends test mode. Closing test mode,
+  combat or secret auras closes the studio too. Session history is not saved.
 
 ## Walking a player through the editor
 
 Use the labels exactly as below; they are what the player sees. The editor says **row**, or
 **column** for a group that grows up or down, where the code says line. `/slop` opens it.
 
-- **Top of the window:** New group, Test mode; Export full config, Import full config,
+- **Top of the window:** New group, Test mode, Layout studio; Export full config, Import full config,
   Import a group. The tree on the left lists groups (with their number of displays, as
   loaded/total while some don't load), then
   bundles (a bag icon before the name) with their groups. Clicking an entry also opens its

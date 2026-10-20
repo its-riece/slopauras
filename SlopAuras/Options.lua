@@ -2219,6 +2219,12 @@ local function LayoutBoxes(group)
       x = AnchorRange(4, 8, "X", "Moves the group right (positive) or left (negative), in pixels"),
       y = AnchorRange(5, 9, "Y", "Moves the group up (positive) or down (negative), in pixels"),
       break4 = Break(9.9),
+      studio = {
+        type = "execute", order = 11, name = "Layout studio",
+        func = function() ns.OpenLayoutStudio({ group }) end,
+        disabled = function() return ns.TestLocked() end,
+      },
+      layerBreak = Break(10.9),
       layer = {
         type = "range", order = 10, name = "Layer", min = 0, max = 10, step = 1,
         desc = "When groups overlap on one frame, the higher layer draws on top",
@@ -2602,6 +2608,11 @@ local function Options()
       disabled = function() return ns.TestLocked() end,
     },
     topBreak = Break(3.9),
+    studio = {
+      type = "execute", order = 3, name = "Layout studio",
+      func = function() ns.OpenLayoutStudio() end,
+      disabled = function() return ns.TestLocked() end,
+    },
   }
   AddTopShare(args, 4)
   for index, group in ipairs(SuiteGroups(nil)) do
@@ -2847,6 +2858,7 @@ end
 local function OnTestHide(frame)
   if frame == testFrame then
     testFrame = nil
+    ns.HideLayoutStudio()
     ns.SetTestOpen(false)
   end
 end
@@ -2857,6 +2869,7 @@ function ns.OpenTest(only)
   if ns.TestLocked() then
     return
   end
+  ns.HideLayoutStudio()
   if only or not testOpened then
     for _, group in ipairs(ns.groups) do
       ns.SetTested(group, not only or tContains(only, group))
@@ -2875,9 +2888,29 @@ function ns.OpenTest(only)
 end
 
 function ns.OnTestEnded()
+  ns.HideLayoutStudio()
   if TestWindow() then
     AceConfigDialog:Close(TEST_APP)
   end
+end
+
+function ns.CloseTest()
+  AceConfigDialog:Close(TEST_APP)
+  ns.SetTestOpen(false)
+end
+
+function ns.OpenLayoutStudio(only)
+  if ns.TestLocked() then
+    return
+  end
+  ns.HideLayoutStudio()
+  AceConfigDialog:Close(TEST_APP)
+  for _, group in ipairs(ns.groups) do
+    ns.SetTested(group, not only or tContains(only, group))
+  end
+  ns.SetTestOpen(true)
+  AceConfigDialog:Close(addonName)
+  ns.ShowLayoutStudio()
 end
 
 -- A click on a tree entry also opens its children. AceConfigDialog doesn't use

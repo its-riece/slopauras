@@ -20,3 +20,4 @@ Chain.lua
 SlopAuras.lua
 Share.lua
 Options.lua
+Layout.lua

@@ -2043,6 +2043,46 @@ function ns.TestLocked()
   return inCombat or C_Secrets.ShouldAurasBeSecret()
 end
 
+-- The studio uses only the fixed placement origins, never container geometry.
+function ns.LayoutTargets()
+  local targets, seen = {}, {}
+  for _, host in ipairs(orderedHosts) do
+    local onHost = {}
+    for _, row in ipairs(host.rows) do
+      local group = row.group
+      if ns.IsTested(group) and not row.released and not onHost[group] then
+        if group.anchorTo == "unit" and host.frame or group.anchorTo ~= "unit" and not seen[group] then
+          table.insert(targets, { group = group, origin = row.origin, unit = host.unit })
+          seen[group] = true
+          onHost[group] = true
+        end
+      end
+    end
+  end
+  return targets
+end
+
+-- Dragging only moves origins; the normal apply runs once the gesture ends.
+function ns.MoveLayoutGroup(group, x, y)
+  if ns.TestLocked() or not tContains(ns.groups, group) then
+    return
+  end
+  if not rawget(group, "anchor") then
+    group.anchor = { "CENTER", nil, "CENTER", 0, 0 }
+  end
+  local function Offset(value)
+    return math.max(-2000, math.min(2000, math.floor(value + 0.5)))
+  end
+  group.anchor[4], group.anchor[5] = Offset(x), Offset(y)
+  for _, host in ipairs(hosts) do
+    for _, row in ipairs(host.rows) do
+      if row.group == group then
+        PlaceOrigin(row, host)
+      end
+    end
+  end
+end
+
 -- How many retired containers are waiting for a /reload to be freed.
 function ns.Leaked()
   return leaked
